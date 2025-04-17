@@ -38,7 +38,7 @@ mpv_handle *hmpv;
 
 static void logger(const char *fmt, ...)
 {
-    fprintf(stderr, "mpvif-motion: ");
+    fprintf(stderr, "mpvif-plugin: ");
 
     va_list ap;
     va_start(ap, fmt);

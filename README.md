@@ -16,7 +16,7 @@ Events are forwarded in the vo.
 
 ### Pointer input
 
-This is a bit more complicated. Button and axis events are forwarded in the vo. However, motion isn't forwarded and does reach the mpv core. Motion is forwarded in a C plugin included in this repository under mpvif-motion/. This is because window positions may not match video positions. 100,100 on the window may not refer to 100,100 on the source video (remote Wayland output) because of black bars, panning, and scaling. The C plugin observes the `mouse-pos` property and calculates the correct motion request to send to the remote compositor using the `osd-dimensions` and `video-params` properties.
+This is a bit more complicated. Button and axis events are forwarded in the vo. However, motion isn't forwarded and does reach the mpv core. Motion is forwarded in a C plugin included in this repository under mpvif-plugin/. This is because window positions may not match video positions. 100,100 on the window may not refer to 100,100 on the source video (remote Wayland output) because of black bars, panning, and scaling. The C plugin observes the `mouse-pos` property and calculates the correct motion request to send to the remote compositor using the `osd-dimensions` and `video-params` properties.
 
 ### Clipboard synchronization
 
@@ -44,7 +44,7 @@ The game should be run in a compositor which supports the virtual-keyboard and v
 
 Build [this](https://github.com/layercak3/mpv/tree/mpvif) mpv branch and set `--wayland-remote-display-name` to the path of the Wayland socket belonging to the remote compositor. Also set `--wayland-remote-output-name` to the name of the output being captured by whatever capture program you're using and `--wayland-remote-seat-name` to the seat that you want the virtual keyboard and pointer to be added to.
 
-Also compile and load the C plugin located in mpvif-motion/.
+Also compile and load the C plugin located in mpvif-plugin/.
 
 You'll probably want to use a dedicated minimal mpv config separate from your normal one. Also use the low-latency profile.
 
