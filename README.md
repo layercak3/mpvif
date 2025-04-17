@@ -10,13 +10,15 @@ Note that some of your shaders may not activate with RGB image formats, so you n
 
 For more details, see the [mpvif branch on my repository](https://github.com/layercak3/mpv/tree/mpvif) and the files in this repository.
 
+Functionality which requires access to objects on the VO connection (e.g. the shell surface) need to be implemented in the VO. Also, keyboard and pointer buttons are forwarded in the VO, to avoid unnecessary lossy translation from mpv keys. Other things can be implemented in a C plugin under mpvif-plugin/ so that there is less VO code to maintain/rebase.
+
 ### Keyboard input
 
 Events are forwarded in the vo.
 
 ### Pointer input
 
-This is a bit more complicated. Button and axis events are forwarded in the vo. However, motion isn't forwarded and does reach the mpv core. Motion is forwarded in a C plugin included in this repository under mpvif-plugin/. This is because window positions may not match video positions. 100,100 on the window may not refer to 100,100 on the source video (remote Wayland output) because of black bars, panning, and scaling. The C plugin observes the `mouse-pos` property and calculates the correct motion request to send to the remote compositor using the `osd-dimensions` and `video-params` properties.
+This is a bit more complicated. Button and axis events are forwarded in the vo. However, motion isn't forwarded and does reach the mpv core. Motion is forwarded in the C plugin instead. This is because window positions may not match video positions. 100,100 on the window may not refer to 100,100 on the source video (remote Wayland output) because of black bars, panning, and scaling. The C plugin observes the `mouse-pos` property and calculates the correct motion request to send to the remote compositor using the `osd-dimensions` and `video-params` properties.
 
 ### Clipboard synchronization
 
@@ -32,7 +34,7 @@ Instead of needing to run another IME instance in the guest, mpv could become an
 
 ### Title synchronization
 
-The title of the focused window should be included in the mpv title. This could be done using foreign-toplevel-management but I don't know which is the one with keyboard focus, so this may require use of compositor-specific IPC.
+The C plugin manages the media title (it sets the `--force-media-title` option during runtime). It sets the media title to "Remote desktop [${wayland-remote-display-name} ${wayland-remote-output-name} ${wayland-remote-seat-name}]". If the remote compositor supports the wlr-foreign-toplevel-management protocol, "Remote desktop" will be replaced with the app ID and title of the currently fullscreened toplevel whenever appropriate.
 
 ### Cursor image synchronization
 
