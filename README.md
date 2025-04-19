@@ -24,9 +24,11 @@ This is a bit more complicated. Button and axis events are forwarded in the vo. 
 
 This is trivial but not implemented yet.
 
-### Pointer locks, confinement, relative motion, auto cursor placement (game warping the cursor)
+### Pointer locks, confinement, relative motion, auto cursor placement (game warping the cursor), mouselook
 
-Not yet investigated. Most of these will probably require private protocol/IPC to get the needed information from the remote compositor.
+When `--wayland-remote-force-grab-cursor` is enabled, the host pointer will be locked to the mpv window and relative motion requests will be emitted on the VO virtual pointer instead of absolute motion on the C plugin virtual pointer. This allows mouselook in 3D applications and auto cursor placement features to work.
+
+In order to automatically enable relative pointer/pointer constraints during the nested application's use of relative pointer/pointer constraints, and map the constraint regions or replicate a pointer warp on the host pointer, private protocol/IPC would be required.
 
 ### Input method relay
 
@@ -44,13 +46,38 @@ Instead of hiding the host cursor and letting the guest cursor be visible and sc
 
 The game should be run in a compositor which supports the virtual-keyboard and virtual-pointer protocols and has a nested or headless backend. Then, use screen capture software to record the output of the remote compositor that the game is placed on to rawvideo over a pipe or v4l2loopback device which mpv can playback.
 
-Build [this](https://github.com/layercak3/mpv/tree/mpvif) mpv branch and set `--wayland-remote-display-name` to the path of the Wayland socket belonging to the remote compositor. Also set `--wayland-remote-output-name` to the name of the output being captured by whatever capture program you're using and `--wayland-remote-seat-name` to the seat that you want the virtual keyboard and pointer to be added to.
+Build [this](https://github.com/layercak3/mpv/tree/mpvif) mpv branch and the C plugin located in mpvif-plugin/. The patch is written in a way that it should be suitable to include in your normal mpv build, because if you don't set any of the `--wayland-remote-*` options, you can use mpv as normal.
 
-Also compile and load the C plugin located in mpvif-plugin/.
+Input forwarding is controlled by the `--wayland-remote-input-forwarding` option (can be changed at runtime), which is disabled by default. For it to work, the `--wayland-remote-display-name`, `--wayland-remote-output-name`, and `--wayland-remote-seat-name` options must be set before VO init. Please read the man page (DOCS/man/options.rst) for details.
 
-You'll probably want to use a dedicated minimal mpv config separate from your normal one. Also use the low-latency profile.
+When input forwarding is enabled, button and motion events will still reach the mpv core. You'll want to disable the osc and anything which reacts to mouse position, not load any keybindings (we will discuss how to enable keybindings at runtime), and prevent any of your scripts from loading key bindings. You should also hide the host cursor with `--cursor-autohide=always`. More generally, you'll want to use a different, more minimal mpv config from your normal one (which should at the bare minimum contain `--profile=low-latency`).
 
-mpv can still be controlled using the input IPC server or the terminal. A key binding to temporarily escape input forwarding and show the cursor may be implemented in the future.
+To downgrade the "no key binding found" messages from warning to trace, you can use --input-downgrade-no-key-binding.
+
+### Keybindings
+
+As discussed, while input forwarding is enabled, mpv can still receive keybindings which would be disruptive. You should have a blank input.conf and use `--no-input-builtin-bindings`. However, it is possible to configure mpv such that you can switch between a "forwarding" mode and a "normal"/"command" mode.
+
+Include only these lines in your input.conf:
+```
+Alt+PAUSE set cursor-autohide no; set wayland-remote-input-forwarding no; load-input-conf ~~home/input-normal.conf; enable-section mpvif
+# Pseudo-key for window closing
+CLOSE_WIN quit
+```
+
+Then, in input-normal.conf:
+```
+Alt+PAUSE {mpvif} set cursor-autohide always; set wayland-remote-input-forwarding yes; disable-section mpvif; load-input-conf ~~home/input.conf
+
+# Include any key bindings you want, but with '{mpvif}' after the key name. See the mpv man page for details on the input.conf syntax.
+q {mpvif} quit
+f {mpvif} cycle fullscreen
+Ctrl-g {mpvif} cycle-values glsl-shaders [...]
+I {mpvif} script-binding stats/display-stats-toggle
+[...]
+```
+
+You can now switch between forwarding and normal mode with `Alt+PAUSE`.
 
 ## Alternative implementation
 
