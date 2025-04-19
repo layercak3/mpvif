@@ -84,6 +84,9 @@ static char *remote_seat_name;
 
 static char media_title[512];
 
+int input_forwarding_enabled = 1;
+int force_grab_cursor_enabled = 0;
+
 mpv_handle *hmpv;
 
 static void logger(const char *fmt, ...)
@@ -350,7 +353,7 @@ static void output_done(void *data, struct wl_output *wl_output)
         if (virtual_pointer)
             destroy_virtual_pointer();
 
-        if (remote_seat)
+        if (remote_seat && input_forwarding_enabled && !force_grab_cursor_enabled)
             create_virtual_pointer();
     }
 }
@@ -400,7 +403,7 @@ static void seat_name(void *data, struct wl_seat *wl_seat,
         if (virtual_pointer)
             destroy_virtual_pointer();
 
-        if (remote_output)
+        if (remote_output && input_forwarding_enabled && !force_grab_cursor_enabled)
             create_virtual_pointer();
     }
 }
@@ -473,7 +476,7 @@ static const struct wl_registry_listener registry_listener = {
     registry_global_remove,
 };
 
-static void mouse_pos_changed(mpv_node *mouse_node)
+static void pchg_mouse_pos(mpv_node *mouse_node)
 {
     if (!virtual_pointer)
         return;
@@ -544,6 +547,24 @@ done:
     mpv_free_node_contents(&video_node);
 }
 
+static void pchg_wayland_remote_input_forwarding(int *value)
+{
+    input_forwarding_enabled = *value;
+    if (virtual_pointer)
+        destroy_virtual_pointer();
+    if (input_forwarding_enabled && !force_grab_cursor_enabled && remote_output && remote_seat)
+        create_virtual_pointer();
+}
+
+static void pchg_wayland_remote_force_grab_cursor(int *value)
+{
+    force_grab_cursor_enabled = *value;
+    if (virtual_pointer)
+        destroy_virtual_pointer();
+    if (!force_grab_cursor_enabled && input_forwarding_enabled && remote_output && remote_seat)
+        create_virtual_pointer();
+}
+
 void wakeup_mpv_events(void *d)
 {
     write(wakeup_pipe[1], &(char){0}, 1);
@@ -563,10 +584,22 @@ static int dispatch_mpv_events(void)
                 return 0;
             case MPV_EVENT_PROPERTY_CHANGE:
                 mpv_event_property *event_prop = event->data;
-                if (event_prop->format == MPV_FORMAT_NODE)
-                    mouse_pos_changed(event_prop->data);
-                else
-                    logger("mouse-pos property unavailable/error");
+                if (strcmp(event_prop->name, "mouse-pos") == 0) {
+                    if (event_prop->format == MPV_FORMAT_NODE)
+                        pchg_mouse_pos(event_prop->data);
+                    else
+                        logger("mouse-pos property unavailable/error");
+                } else if (strcmp(event_prop->name, "wayland-remote-input-forwarding") == 0) {
+                    if (event_prop->format == MPV_FORMAT_FLAG)
+                        pchg_wayland_remote_input_forwarding(event_prop->data);
+                    else
+                        logger("wayland-remote-input-forwarding property unavailable/error");
+                } else if (strcmp(event_prop->name, "wayland-remote-force-grab-cursor") == 0) {
+                    if (event_prop->format == MPV_FORMAT_FLAG)
+                        pchg_wayland_remote_force_grab_cursor(event_prop->data);
+                    else
+                        logger("wayland-remote-force-grab-cursor property unavailable/error");
+                }
                 break;
             default:
                 break;
@@ -624,6 +657,20 @@ int mpv_open_cplugin(mpv_handle *mpv)
         logger("failed to get the optional foreign toplevel manager object, force-media-title won't be updated for fullscreen windows");
 
     set_generic_title();
+    if (mpv_observe_property(hmpv, 0, "wayland-remote-input-forwarding",
+                MPV_FORMAT_FLAG) != 0) {
+        logger("failed to observe the wayland-remote-input-forwarding property");
+        goto done;
+    }
+    if (mpv_observe_property(hmpv, 0, "wayland-remote-force-grab-cursor",
+                MPV_FORMAT_FLAG) != 0) {
+        logger("failed to observe the wayland-remote-force-grab-cursor property");
+        goto done;
+    }
+    mpv_get_property(hmpv, "wayland-remote-input-forwarding", MPV_FORMAT_FLAG,
+            &input_forwarding_enabled);
+    mpv_get_property(hmpv, "wayland-remote-force-grab-cursor", MPV_FORMAT_FLAG,
+            &force_grab_cursor_enabled);
 
     if (pipe2(wakeup_pipe, O_CLOEXEC | O_NONBLOCK) == -1) {
         logger("pipe2() failed: %m");
