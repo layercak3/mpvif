@@ -50,7 +50,7 @@ Build [this](https://github.com/layercak3/mpv/tree/mpvif) mpv branch and the C p
 
 Input forwarding is controlled by the `--wayland-remote-input-forwarding` option (can be changed at runtime), which is disabled by default. For it to work, the `--wayland-remote-display-name`, `--wayland-remote-output-name`, and `--wayland-remote-seat-name` options must be set before VO init. Please read the man page (DOCS/man/options.rst) for details.
 
-When input forwarding is enabled, button and motion events will still reach the mpv core. You'll want to disable the osc and anything which reacts to mouse position, not load any keybindings (we will discuss how to enable keybindings at runtime), and prevent any of your scripts from loading key bindings. You should also hide the host cursor with `--cursor-autohide=always`. More generally, you'll want to use a different, more minimal mpv config from your normal one (which should at the bare minimum contain `--profile=low-latency`).
+When input forwarding is enabled, button and motion events will still reach the mpv core. You'll want to disable the osc and anything which reacts to mouse position, not load any keybindings (we will discuss how to enable keybindings at runtime), and prevent any of your scripts from loading key bindings. You should also hide the host cursor with `--cursor-autohide=always` and disable VO dragging with `--input-builtin-dragging=no`. More generally, you'll want to use a different, more minimal mpv config from your normal one (which should at the bare minimum contain `--profile=low-latency`).
 
 To downgrade the "no key binding found" messages from warning to trace, you can use --input-downgrade-no-key-binding.
 
