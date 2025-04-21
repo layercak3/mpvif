@@ -481,7 +481,7 @@ static void pchg_mouse_pos(mpv_node *mouse_node)
     mpv_node osd_node = {0};
     mpv_node video_node = {0};
 
-    int32_t mouse_pos_x, mouse_pos_y;
+    int32_t mouse_pos_x = 0, mouse_pos_y = 0;
     list = mouse_node->u.list;
     for (int i = 0; i < list->num; i++) {
         char *key = list->keys[i];
@@ -496,6 +496,7 @@ static void pchg_mouse_pos(mpv_node *mouse_node)
         goto done;
 
     int32_t osd_ml, osd_mr, osd_mt, osd_mb, osd_w, osd_h;
+    osd_ml = osd_mr = osd_mt = osd_mb = osd_w = osd_h = 0;
     list = osd_node.u.list;
     for (int i = 0; i < list->num; i++) {
         char *key = list->keys[i];
@@ -517,7 +518,7 @@ static void pchg_mouse_pos(mpv_node *mouse_node)
     if (mpv_get_property(hmpv, "video-params", MPV_FORMAT_NODE, &video_node) != 0)
         goto done;
 
-    int32_t video_w, video_h;
+    int32_t video_w = 0, video_h = 0;
     list = video_node.u.list;
     for (int i = 0; i < list->num; i++) {
         char *key = list->keys[i];
