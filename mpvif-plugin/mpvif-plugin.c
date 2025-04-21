@@ -528,6 +528,9 @@ static void pchg_mouse_pos(mpv_node *mouse_node)
             video_h = value->u.int64;
     }
 
+    if (((osd_w - osd_ml - osd_mr) == 0) || ((osd_h - osd_mt - osd_mb) == 0))
+        goto done;
+
     int32_t video_pos_x = (mouse_pos_x - osd_ml) * video_w / (osd_w - osd_ml - osd_mr);
     int32_t video_pos_y = (mouse_pos_y - osd_mt) * video_h / (osd_h - osd_mt - osd_mb);
 
