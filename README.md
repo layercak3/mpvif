@@ -1,8 +1,8 @@
 # mpvif
 
-This is a patch and C plugin for mpv which makes mpv control a remote (typically nested or headless) Wayland compositor using virtual-keyboard and virtual-pointer protocols.
+This is a patch and C plugin for mpv which makes mpv control a headless Wayland compositor using virtual-keyboard and virtual-pointer protocols.
 
-The intended use case is for upscaling 2D games using popular upscaling techniques already available for mpv. The game is run under a compatible compositor which is screen captured to a pipe or v4l2loopback device read by mpv which can perform processing on the video such as upscaling. Keyboard and pointer input on the mpv window is ignored by mpv and instead forwarded to a virtual keyboard and pointer on the compositor, essentially turning mpv into a remote desktop client.
+The intended use case is for upscaling 2D games using popular upscaling techniques already available for mpv. The game is run under a compatible compositor which is screen captured to a pipe or v4l2loopback device read by mpv which can perform processing on the video such as upscaling. Keyboard and pointer input on the mpv window is forwarded to a virtual keyboard and pointer on the compositor, essentially turning mpv into a remote desktop client.
 
 Note that some of your shaders may not activate with RGB image formats, so you need to find RGB variants of them. Otherwise, you can convert the video to YUV444 and be careful not to mess up the colours in the process. Using `--vf=format=fmt=yuv444p10:gamma=bt.1886:convert=yes` seems to look ok. Probably the most popular and interesting shader which works without needing image format conversion is currently https://funnyplanter.github.io.
 
@@ -18,7 +18,7 @@ Events are forwarded in the vo.
 
 ### Pointer input
 
-This is a bit more complicated. Button and axis events are forwarded in the vo. However, motion isn't forwarded and does reach the mpv core. Motion is forwarded in the C plugin instead. This is because window positions may not match video positions. 100,100 on the window may not refer to 100,100 on the source video (remote Wayland output) because of black bars, panning, and scaling. The C plugin observes the `mouse-pos` property and calculates the correct motion request to send to the remote compositor using the `osd-dimensions` and `video-params` properties.
+This is a bit more complicated. Button and axis events are forwarded in the vo. However, motion is forwarded in the C plugin instead of the vo. This is because window positions may not match video positions. 100,100 on the window may not refer to 100,100 on the source video (remote Wayland output) because of black bars, panning, and scaling. The C plugin observes the `mouse-pos` property and calculates the correct motion request to send to the remote compositor using the `osd-dimensions` and `video-params` properties.
 
 ### Clipboard synchronization
 
