@@ -79,6 +79,34 @@ I {mpvif} script-binding stats/display-stats-toggle
 
 You can now switch between forwarding and normal mode with `Alt+PAUSE`.
 
+### Tips
+
+This section will contain text which is not strictly related to the implementation of mpvif, but may be helpful.
+
+#### Headless compositor
+
+You can run sway headless with `WLR_RENDER_DRM_DEVICE=/dev/dri/XXX WLR_BACKENDS=headless sway -c /path/to/special/config` (see wlroots docs). You can also use other compositors as long as they support at least virtual-keyboard and virtual-pointer.
+
+You should configure the HEADLESS-1 output in the config file or at runtime to the resolution that you want (typically the game native resolution at fullscreen). The refresh rate should be the maximum refresh rate you want to allow. If this is too high for your configuration and system, latency can suffer. You can get away with heavier shaders if you reduce the refresh rate of the compositor and game.
+
+#### Recording to mpv
+
+Example: `WAYLAND_DISPLAY=/path/to/headless/compositor wf-recorder -y -m rawvideo -c rawvideo -f pipe:1 -x bgra | mpv - --wayland-remote-display-name=/path/to/headless/compositor --wayland-remote-output-name=HEADLESS-1 --wayland-remote-seat-name=seat0 --demuxer=+rawvideo --demuxer-rawvideo-mp-format=bgra --demuxer-rawvideo-w=1280 --demuxer-rawvideo-h=720 --untimed`
+
+For this example, you need to be using the master branch of wf-recorder, otherwise there is a bug which results in the image in mpv being shifted. Alternatively, you could redirect the pipes differently (`-f pipe:99 99>&1 >&2`), use `-m nut` instead of the rawvideo muxer, or use a v4l2loopback device instead of a pipe. Using v4l2 instead of a pipe is less performant.
+
+If you need the video in YUV444 for certain shaders, you can add `--vf=format=fmt=yuv444p10:gamma=bt.1886:convert=yes`, which appears identical.
+
+If you are trying other codecs and formats, you may or may not need `--untimed`, and you may have problems like the mpv window not appearing or mpv hanging while quitting due to waiting for frames from wf-recorder when the game/compositor is not drawing. You can add `-D -r $(fps)` to wf-recorder to stream at a constant refresh rate. This should not be needed with the rawvideo pipe example provided above.
+
+#### Problems with seat keyboard/pointer hotplugging
+
+With a headless compositor, there will be no keyboards or pointers except for mpvif's virtual keyboard and pointer(s). When mpv is not running, there will be no input devices (perhaps unless you are running an IME which uses virtual-keyboard in the headless display). Applications running will lose the keyboard and pointer capability on their seat until mpvif comes back. Some applications might have problems with this kind of hotplugging:
+
+* Wine's Wayland driver may crash. This will be fixed in upstream wine soon.
+
+As a workaround, you could write a daemon which creates an unused virtual keyboard/pointer and keep the connection alive, so that the applications never lose the keyboard/pointer capability.
+
 ## Alternative implementation
 
 Using mpv window embedding (`--wid`) over a dedicated input surface client is not possible on Wayland. Using the libmpv render API has limitations compared to standalone mpv VOs so I'm hesitant to use that. Modifying the wayland VO code is also the simplest implementation.
