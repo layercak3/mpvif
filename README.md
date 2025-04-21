@@ -48,6 +48,8 @@ The game should be run in a compositor which supports the virtual-keyboard and v
 
 Build [this](https://github.com/layercak3/mpv/tree/mpvif) mpv branch and the C plugin located in mpvif-plugin/. The patch is written in a way that it should be suitable to include in your normal mpv build, because if you don't set any of the `--wayland-remote-*` options, you can use mpv as normal.
 
+The build process for the mpv branch is the exact same as upstream mpv. To build the C plugin, run `make` in the mpvif-plugin/ directory. You can then copy `mpvif-plugin.so` to your scripts directory or use `make install` which will install to ~/.config/mpv/scripts/ if running as non-root or to the system if running as root. The C plugin dependencies are a subset of what mpv requires.
+
 Input forwarding is controlled by the `--wayland-remote-input-forwarding` option (can be changed at runtime), which is disabled by default. For it to work, the `--wayland-remote-display-name`, `--wayland-remote-output-name`, and `--wayland-remote-seat-name` options must be set before VO init. Please read the man page (DOCS/man/options.rst) for details.
 
 When input forwarding is enabled, button and motion events will still reach the mpv core. You'll want to disable the osc and anything which reacts to mouse position, not load any keybindings (we will discuss how to enable keybindings at runtime), and prevent any of your scripts from loading key bindings. You should also hide the host cursor with `--cursor-autohide=always` and disable VO dragging with `--input-builtin-dragging=no`. More generally, you'll want to use a different, more minimal mpv config from your normal one (which should at the bare minimum contain `--profile=low-latency`).
