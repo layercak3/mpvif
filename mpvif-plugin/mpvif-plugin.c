@@ -52,7 +52,6 @@ struct wayland_output {
 struct wayland_seat {
     struct wl_seat *obj;
     uint32_t global_id;
-    char *name;
     struct wl_list link;
 };
 
@@ -169,7 +168,6 @@ static void destroy_seat(struct wayland_seat *s)
     }
 
     wl_seat_release(s->obj);
-    free(s->name);
     wl_list_remove(&s->link);
     free(s);
 }
@@ -394,10 +392,8 @@ static void seat_name(void *data, struct wl_seat *wl_seat,
         const char *name)
 {
     struct wayland_seat *s = data;
-    free(s->name);
-    s->name = strdup(name);
 
-    if (strcmp(s->name, remote_seat_name) == 0) {
+    if (strcmp(name, remote_seat_name) == 0) {
         remote_seat = s;
 
         if (virtual_pointer)
