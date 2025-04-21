@@ -570,6 +570,28 @@ void wakeup_mpv_events(void *d)
     write(wakeup_pipe[1], &(char){0}, 1);
 }
 
+static void property_change_event(mpv_event *event)
+{
+    mpv_event_property *event_prop = event->data;
+
+    if (strcmp(event_prop->name, "mouse-pos") == 0) {
+        if (event_prop->format == MPV_FORMAT_NODE)
+            pchg_mouse_pos(event_prop->data);
+        else
+            logger("mouse-pos property unavailable/error");
+    } else if (strcmp(event_prop->name, "wayland-remote-input-forwarding") == 0) {
+        if (event_prop->format == MPV_FORMAT_FLAG)
+            pchg_wayland_remote_input_forwarding(event_prop->data);
+        else
+            logger("wayland-remote-input-forwarding property unavailable/error");
+    } else if (strcmp(event_prop->name, "wayland-remote-force-grab-cursor") == 0) {
+        if (event_prop->format == MPV_FORMAT_FLAG)
+            pchg_wayland_remote_force_grab_cursor(event_prop->data);
+        else
+            logger("wayland-remote-force-grab-cursor property unavailable/error");
+    }
+}
+
 static int dispatch_mpv_events(void)
 {
     char drain[4096];
@@ -583,23 +605,7 @@ static int dispatch_mpv_events(void)
             case MPV_EVENT_NONE:
                 return 0;
             case MPV_EVENT_PROPERTY_CHANGE:
-                mpv_event_property *event_prop = event->data;
-                if (strcmp(event_prop->name, "mouse-pos") == 0) {
-                    if (event_prop->format == MPV_FORMAT_NODE)
-                        pchg_mouse_pos(event_prop->data);
-                    else
-                        logger("mouse-pos property unavailable/error");
-                } else if (strcmp(event_prop->name, "wayland-remote-input-forwarding") == 0) {
-                    if (event_prop->format == MPV_FORMAT_FLAG)
-                        pchg_wayland_remote_input_forwarding(event_prop->data);
-                    else
-                        logger("wayland-remote-input-forwarding property unavailable/error");
-                } else if (strcmp(event_prop->name, "wayland-remote-force-grab-cursor") == 0) {
-                    if (event_prop->format == MPV_FORMAT_FLAG)
-                        pchg_wayland_remote_force_grab_cursor(event_prop->data);
-                    else
-                        logger("wayland-remote-force-grab-cursor property unavailable/error");
-                }
+                property_change_event(event);
                 break;
             default:
                 break;
