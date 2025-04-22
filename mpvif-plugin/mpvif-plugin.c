@@ -83,10 +83,10 @@ static char *remote_seat_name;
 
 static char media_title[512];
 
-int input_forwarding_enabled = 1;
-int force_grab_cursor_enabled = 0;
+static int input_forwarding_enabled = 1;
+static int force_grab_cursor_enabled = 0;
 
-mpv_handle *hmpv;
+static mpv_handle *hmpv;
 
 static void logger(const char *fmt, ...)
 {
