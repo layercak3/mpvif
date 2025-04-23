@@ -34,14 +34,6 @@
 #include "foreign-toplevel-management-client-protocol.h"
 #include "virtual-pointer-client-protocol.h"
 
-static struct wl_display *display;
-static struct wl_registry *registry;
-
-static struct zwlr_virtual_pointer_manager_v1 *virtual_pointer_manager;
-static struct zwlr_virtual_pointer_v1 *virtual_pointer;
-
-static struct zwlr_foreign_toplevel_manager_v1 *toplevel_manager;
-
 struct wayland_output {
     struct wl_output *obj;
     uint32_t global_id;
@@ -64,11 +56,38 @@ struct wayland_toplevel_handle {
     struct wl_list link;
 };
 
+struct mouse_pos_values {
+    int64_t x;
+    int64_t y;
+};
+
+struct osd_dimensions_values {
+    int64_t ml;
+    int64_t mr;
+    int64_t mt;
+    int64_t mb;
+    int64_t w;
+    int64_t h;
+};
+
+struct video_params_values {
+    int64_t w;
+    int64_t h;
+};
+
 static struct wayland_toplevel_handle *current_eligible_toplevel;
 
 static struct wl_list wayland_output_list;
 static struct wl_list wayland_seat_list;
 static struct wl_list wayland_toplevel_handle_list;
+
+static struct wl_display *display;
+static struct wl_registry *registry;
+
+static struct zwlr_virtual_pointer_manager_v1 *virtual_pointer_manager;
+static struct zwlr_virtual_pointer_v1 *virtual_pointer;
+
+static struct zwlr_foreign_toplevel_manager_v1 *toplevel_manager;
 
 static struct wayland_output *remote_output;
 static struct wayland_seat *remote_seat;
@@ -105,6 +124,65 @@ static int timestamp(void)
     clock_gettime(CLOCK_MONOTONIC, &tp);
     int ms = 1000 * tp.tv_sec + tp.tv_nsec / 1000000;
     return ms;
+}
+
+struct mouse_pos_values mouse_node_get_values(mpv_node *node)
+{
+    struct mouse_pos_values mouse_v = {0};
+
+    mpv_node_list *list = node->u.list;
+    for (int i = 0; i < list->num; i++) {
+        char *key = list->keys[i];
+        mpv_node *value = &list->values[i];
+        if (strcmp(key, "x") == 0)
+            mouse_v.x = value->u.int64;
+        else if (strcmp(key, "y") == 0)
+            mouse_v.y = value->u.int64;
+    }
+
+    return mouse_v;
+}
+
+struct osd_dimensions_values osd_node_get_values(mpv_node *node)
+{
+    struct osd_dimensions_values osd_v = {0};
+
+    mpv_node_list *list = node->u.list;
+    for (int i = 0; i < list->num; i++) {
+        char *key = list->keys[i];
+        mpv_node *value = &list->values[i];
+        if (strcmp(key, "ml") == 0)
+            osd_v.ml = value->u.int64;
+        else if (strcmp(key, "mr") == 0)
+            osd_v.mr = value->u.int64;
+        else if (strcmp(key, "mt") == 0)
+            osd_v.mt = value->u.int64;
+        else if (strcmp(key, "mb") == 0)
+            osd_v.mb = value->u.int64;
+        else if (strcmp(key, "w") == 0)
+            osd_v.w = value->u.int64;
+        else if (strcmp(key, "h") == 0)
+            osd_v.h = value->u.int64;
+    }
+
+    return osd_v;
+}
+
+struct video_params_values video_node_get_values(mpv_node *node)
+{
+    struct video_params_values video_v = {0};
+
+    mpv_node_list *list = node->u.list;
+    for (int i = 0; i < list->num; i++) {
+        char *key = list->keys[i];
+        mpv_node *value = &list->values[i];
+        if (strcmp(key, "w") == 0)
+            video_v.w = value->u.int64;
+        else if (strcmp(key, "h") == 0)
+            video_v.h = value->u.int64;
+    }
+
+    return video_v;
 }
 
 static void set_fullscreen_title(void)
@@ -477,69 +555,30 @@ static void pchg_mouse_pos(mpv_node *mouse_node)
     if (!virtual_pointer)
         return;
 
-    mpv_node_list *list;
     mpv_node osd_node = {0};
     mpv_node video_node = {0};
-
-    int32_t mouse_pos_x = 0, mouse_pos_y = 0;
-    list = mouse_node->u.list;
-    for (int i = 0; i < list->num; i++) {
-        char *key = list->keys[i];
-        mpv_node *value = &list->values[i];
-        if (strcmp(key, "x") == 0)
-            mouse_pos_x = value->u.int64;
-        else if (strcmp(key, "y") == 0)
-            mouse_pos_y = value->u.int64;
-    }
 
     if (mpv_get_property(hmpv, "osd-dimensions", MPV_FORMAT_NODE, &osd_node) != 0)
         goto done;
 
-    int32_t osd_ml, osd_mr, osd_mt, osd_mb, osd_w, osd_h;
-    osd_ml = osd_mr = osd_mt = osd_mb = osd_w = osd_h = 0;
-    list = osd_node.u.list;
-    for (int i = 0; i < list->num; i++) {
-        char *key = list->keys[i];
-        mpv_node *value = &list->values[i];
-        if (strcmp(key, "ml") == 0)
-            osd_ml = value->u.int64;
-        else if (strcmp(key, "mr") == 0)
-            osd_mr = value->u.int64;
-        else if (strcmp(key, "mt") == 0)
-            osd_mt = value->u.int64;
-        else if (strcmp(key, "mb") == 0)
-            osd_mb = value->u.int64;
-        else if (strcmp(key, "w") == 0)
-            osd_w = value->u.int64;
-        else if (strcmp(key, "h") == 0)
-            osd_h = value->u.int64;
-    }
-
     if (mpv_get_property(hmpv, "video-params", MPV_FORMAT_NODE, &video_node) != 0)
         goto done;
 
-    int32_t video_w = 0, video_h = 0;
-    list = video_node.u.list;
-    for (int i = 0; i < list->num; i++) {
-        char *key = list->keys[i];
-        mpv_node *value = &list->values[i];
-        if (strcmp(key, "w") == 0)
-            video_w = value->u.int64;
-        else if (strcmp(key, "h") == 0)
-            video_h = value->u.int64;
-    }
+    struct mouse_pos_values mouse_v = mouse_node_get_values(mouse_node);
+    struct osd_dimensions_values osd_v = osd_node_get_values(&osd_node);
+    struct video_params_values video_v = video_node_get_values(&video_node);
 
-    if (((osd_w - osd_ml - osd_mr) == 0) || ((osd_h - osd_mt - osd_mb) == 0))
+    if (((osd_v.w - osd_v.ml - osd_v.mr) == 0) || ((osd_v.h - osd_v.mt - osd_v.mb) == 0))
         goto done;
 
-    int32_t video_pos_x = (mouse_pos_x - osd_ml) * video_w / (osd_w - osd_ml - osd_mr);
-    int32_t video_pos_y = (mouse_pos_y - osd_mt) * video_h / (osd_h - osd_mt - osd_mb);
+    int32_t video_pos_x = (mouse_v.x - osd_v.ml) * video_v.w / (osd_v.w - osd_v.ml - osd_v.mr);
+    int32_t video_pos_y = (mouse_v.y - osd_v.mt) * video_v.h / (osd_v.h - osd_v.mt - osd_v.mb);
 
     if (video_pos_x < 0) video_pos_x = 0;
     if (video_pos_y < 0) video_pos_y = 0;
 
     zwlr_virtual_pointer_v1_motion_absolute(virtual_pointer, timestamp(),
-            video_pos_x, video_pos_y, video_w, video_h);
+            video_pos_x, video_pos_y, video_v.w, video_v.h);
     zwlr_virtual_pointer_v1_frame(virtual_pointer);
 
 done:
