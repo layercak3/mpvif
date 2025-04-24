@@ -668,6 +668,10 @@ static int dispatch_mpv_events(void)
 static void update_output_layout_pos(void)
 {
     I3ipc_reply_outputs *reply = i3ipc_get_outputs();
+    /* During the main loop, poll would just fail. This is for the first call in
+     * mpv_open_cplugin. */
+    if (i3ipc_error_code() == I3IPC_ERROR_CLOSED)
+        logger("sway IPC connection failed");
     if (!reply)
         return;
 
