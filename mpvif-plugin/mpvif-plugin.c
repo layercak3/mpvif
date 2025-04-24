@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/param.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -574,8 +575,8 @@ static void pchg_mouse_pos(mpv_node *mouse_node)
     int32_t video_pos_x = (mouse_v.x - osd_v.ml) * video_v.w / (osd_v.w - osd_v.ml - osd_v.mr);
     int32_t video_pos_y = (mouse_v.y - osd_v.mt) * video_v.h / (osd_v.h - osd_v.mt - osd_v.mb);
 
-    if (video_pos_x < 0) video_pos_x = 0;
-    if (video_pos_y < 0) video_pos_y = 0;
+    video_pos_x = MAX(video_pos_x, 0);
+    video_pos_y = MAX(video_pos_y, 0);
 
     zwlr_virtual_pointer_v1_motion_absolute(virtual_pointer, timestamp(),
             video_pos_x, video_pos_y, video_v.w, video_v.h);
