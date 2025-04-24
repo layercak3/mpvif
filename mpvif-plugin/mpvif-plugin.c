@@ -841,6 +841,7 @@ int mpv_open_cplugin(mpv_handle *mpv)
             remote_swaysock = NULL;
         } else {
             i3ipc_init_try(remote_swaysock_dup);
+            i3ipc_set_nopanic(true);
             i3ipc_subscribe(i3ipc_event, sizeof(i3ipc_event) / sizeof(i3ipc_event[0]));
         }
     }
