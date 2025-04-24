@@ -1,18 +1,20 @@
 /*
  * Copyright 2025 Attila Fidan
  *
- * This program is free software: you can redistribute it and/or modify
+ * This file is part of mpvif-plugin.
+ *
+ * mpvif-plugin is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or (at
  * your option) any later version.
  *
- * This program is distributed in the hope that it will be useful, but
+ * mpvif-plugin is distributed in the hope that it will be useful, but
  * WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
  * General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ * along with mpvif-plugin. If not, see <https://www.gnu.org/licenses/>.
  */
 
 #define _GNU_SOURCE
@@ -34,6 +36,9 @@
 
 #include "foreign-toplevel-management-client-protocol.h"
 #include "virtual-pointer-client-protocol.h"
+
+#define I3IPC_IMPLEMENTATION
+#include "i3ipc.h"
 
 struct wayland_output {
     struct wl_output *obj;
@@ -100,11 +105,15 @@ static uint64_t mouse_pos_reply_userdata = 1;
 static char *remote_display_name;
 static char *remote_output_name;
 static char *remote_seat_name;
+static char *remote_swaysock;
 
 static char media_title[512];
 
 static int input_forwarding_enabled = 1;
 static int force_grab_cursor_enabled = 0;
+
+static int output_layout_x;
+static int output_layout_y;
 
 static mpv_handle *hmpv;
 
@@ -656,6 +665,110 @@ static int dispatch_mpv_events(void)
     }
 }
 
+static void update_output_layout_pos(void)
+{
+    I3ipc_reply_outputs *reply = i3ipc_get_outputs();
+
+    for (int i = 0; i < reply->outputs_size; i++) {
+        I3ipc_reply_outputs_el *output = &reply->outputs[i];
+
+        if (strcmp(output->name, remote_output_name) == 0) {
+            output_layout_x = output->rect.x;
+            output_layout_y = output->rect.y;
+            break;
+        }
+    }
+
+    free(reply);
+}
+
+static void i3e_output(I3ipc_event *ev_any)
+{
+    update_output_layout_pos();
+}
+
+static void set_mpv_mouse_pos(int64_t x, int64_t y)
+{
+    mpv_node mouse_pos_node = {0};
+    mouse_pos_node.format = MPV_FORMAT_NODE_MAP;
+
+    mpv_node_list mouse_pos_node_list = {0};
+    mouse_pos_node.u.list = &mouse_pos_node_list;
+    mouse_pos_node_list.num = 3;
+
+    char *keys[3] = {"x", "y", "hover"};
+    mouse_pos_node_list.keys = keys;
+
+    mpv_node mouse_pos_values_node[3] = {
+        { .format = MPV_FORMAT_INT64, .u.int64 = x },
+        { .format = MPV_FORMAT_INT64, .u.int64 = y },
+        { .format = MPV_FORMAT_FLAG,  .u.flag = 1 },
+    };
+    mouse_pos_node_list.values = mouse_pos_values_node;
+
+    mpv_set_property(hmpv, "mouse-pos", MPV_FORMAT_NODE, &mouse_pos_node);
+}
+
+static void i3e_cursor_warp(I3ipc_event *ev_any)
+{
+    I3ipc_event_cursor_warp *ev = (I3ipc_event_cursor_warp *)ev_any;
+
+    int output_local_x = ev->lx - output_layout_x;
+    int output_local_y = ev->ly - output_layout_y;
+
+    mpv_node osd_node = {0};
+    mpv_node video_node = {0};
+
+    if (mpv_get_property(hmpv, "osd-dimensions", MPV_FORMAT_NODE, &osd_node) != 0)
+        goto done;
+
+    if (mpv_get_property(hmpv, "video-params", MPV_FORMAT_NODE, &video_node) != 0)
+        goto done;
+
+    struct osd_dimensions_values osd_v = osd_node_get_values(&osd_node);
+    struct video_params_values video_v = video_node_get_values(&video_node);
+
+    int64_t mouse_pos_x = (output_local_x * (osd_v.w - osd_v.ml - osd_v.mr) / video_v.w) + osd_v.ml;
+    int64_t mouse_pos_y = (output_local_y * (osd_v.h - osd_v.mt - osd_v.mb) / video_v.h) + osd_v.mt;
+
+    mouse_pos_x = MAX(mouse_pos_x, 0);
+    mouse_pos_x = MIN(mouse_pos_x, osd_v.w);
+
+    mouse_pos_y = MAX(mouse_pos_y, 0);
+    mouse_pos_y = MIN(mouse_pos_y, osd_v.h);
+
+    set_mpv_mouse_pos(mouse_pos_x, mouse_pos_y);
+
+done:
+    mpv_free_node_contents(&osd_node);
+    mpv_free_node_contents(&video_node);
+}
+
+static int dispatch_i3ipc_events(void)
+{
+    while (true) {
+        I3ipc_event *ev_any = i3ipc_event_next(0);
+        if (!ev_any)
+            return 0;
+
+        switch (ev_any->type) {
+            case I3IPC_EVENT_SHUTDOWN:
+                free(ev_any);
+                return -1;
+            case I3IPC_EVENT_OUTPUT:
+                i3e_output(ev_any);
+                break;
+            case I3IPC_EVENT_CURSOR_WARP:
+                i3e_cursor_warp(ev_any);
+                break;
+            default:
+                break;
+        }
+
+        free(ev_any);
+    }
+}
+
 int mpv_open_cplugin(mpv_handle *mpv)
 {
     int rc = -1;
@@ -682,6 +795,10 @@ int mpv_open_cplugin(mpv_handle *mpv)
         goto done;
     }
 
+    remote_swaysock = mpv_get_property_string(hmpv, "wayland-remote-swaysock");
+    if (!remote_swaysock)
+        logger("no remote swaysock set, will not relay application pointer warps to the host");
+
     display = wl_display_connect(remote_display_name);
     if (!display) {
         logger("failed to connect to the remote compositor");
@@ -705,7 +822,27 @@ int mpv_open_cplugin(mpv_handle *mpv)
     if (!toplevel_manager)
         logger("failed to get the optional foreign toplevel manager object, force-media-title won't be updated for fullscreen windows");
 
+    /* i3ipc_init_try calls free() on your string.
+     * also, what if the plugin exits and is loaded again? */
+    int i3ipc_event[] = {
+        I3IPC_EVENT_SHUTDOWN,
+        I3IPC_EVENT_OUTPUT,
+        I3IPC_EVENT_CURSOR_WARP
+    };
+    if (remote_swaysock) {
+        char *remote_swaysock_dup = strdup(remote_swaysock);
+        if (!remote_swaysock_dup) {
+            mpv_free(remote_swaysock);
+            remote_swaysock = NULL;
+        } else {
+            i3ipc_init_try(remote_swaysock_dup);
+            i3ipc_subscribe(i3ipc_event, sizeof(i3ipc_event) / sizeof(i3ipc_event[0]));
+        }
+    }
+
     set_generic_title();
+    if (remote_swaysock)
+        update_output_layout_pos();
     if (mpv_observe_property(hmpv, 0, "wayland-remote-input-forwarding",
                 MPV_FORMAT_FLAG) != 0) {
         logger("failed to observe the wayland-remote-input-forwarding property");
@@ -728,15 +865,18 @@ int mpv_open_cplugin(mpv_handle *mpv)
 
     mpv_set_wakeup_callback(hmpv, wakeup_mpv_events, NULL);
 
-    struct pollfd pfd[2] = {
+    int i3ipc_fd = remote_swaysock ? i3ipc_event_fd() : -1;
+
+    struct pollfd pfd[3] = {
         {.fd = wl_display_get_fd(display),  .events = POLLIN },
         {.fd = wakeup_pipe[0],              .events = POLLIN },
+        {.fd = i3ipc_fd,                    .events = POLLIN },
     };
 
     while (true) {
         wl_display_flush(display);
 
-        if (poll(pfd, 2, -1) == -1) {
+        if (poll(pfd, 3, -1) == -1) {
             logger("poll() failed: %m");
             break;
         }
@@ -758,6 +898,18 @@ int mpv_open_cplugin(mpv_handle *mpv)
 
         if (pfd[1].revents & (POLLERR | POLLHUP | POLLNVAL)) {
             logger("error or hangup on wakeup pipe read fd");
+            break;
+        }
+
+        if (pfd[2].revents & POLLIN) {
+            if (dispatch_i3ipc_events() == -1) {
+                rc = 0;
+                break;
+            }
+        }
+
+        if (pfd[2].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+            logger("error or hangup on i3ipc read fd");
             break;
         }
     }
@@ -786,6 +938,8 @@ done:
     mpv_free(remote_display_name);
     mpv_free(remote_output_name);
     mpv_free(remote_seat_name);
+    if (remote_swaysock)
+        mpv_free(remote_swaysock);
 
     return rc;
 }

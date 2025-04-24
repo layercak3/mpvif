@@ -5,7 +5,7 @@ BASE_LDFLAGS = $(shell $(PKG_CONFIG) --libs wayland-client)
 
 WAYLAND_SCANNER = $(shell pkg-config --variable=wayland_scanner wayland-scanner)
 
-HEADERS = foreign-toplevel-management-client-protocol.h virtual-pointer-client-protocol.h
+HEADERS = foreign-toplevel-management-client-protocol.h virtual-pointer-client-protocol.h i3ipc.h
 SOURCES = mpvif-plugin.c foreign-toplevel-management-client-protocol.c virtual-pointer-client-protocol.c
 
 SCRIPTS_DIR := $(HOME)/.config/mpv/scripts

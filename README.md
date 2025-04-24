@@ -24,11 +24,25 @@ This is a bit more complicated. Button and axis events are forwarded in the vo. 
 
 This is trivial but not implemented yet.
 
-### Pointer locks, confinement, relative motion, auto cursor placement (game warping the cursor), mouselook
+### Pointer locks, confinement, relative motion, mouselook
 
-When `--wayland-remote-force-grab-cursor` is enabled, the host pointer will be locked to the mpv window and relative motion requests will be emitted on the VO virtual pointer instead of absolute motion on the C plugin virtual pointer. This allows mouselook in 3D applications and auto cursor placement features to work.
+When `--wayland-remote-force-grab-cursor` is enabled, the host pointer will be locked to the mpv window and relative motion requests will be emitted on the VO virtual pointer instead of absolute motion on the C plugin virtual pointer. This allows mouselook in 3D applications to work.
 
-In order to automatically enable relative pointer/pointer constraints during the nested application's use of relative pointer/pointer constraints, and map the constraint regions or replicate a pointer warp on the host pointer, private protocol/IPC would be required.
+In order to automatically enable relative pointer/pointer constraints during the nested application's use of relative pointer/pointer constraints, and map the constraint regions, private protocol/IPC would be required.
+
+### Auto cursor placement (game pointer warping)
+
+When sway with [this patch](https://github.com/layercak3/sway/tree/ipc-event-cursor-warp) is the remote compositor, auto cursor placement is supported. The C plugin is notified by sway using i3 IPC when applications warp the pointer and it calculates the surface-local position using the `osd-dimensions` and `video-params` properties. A VO control is used to tell the VO to replicate the pointer warp on the host mpv window. This reuses the `mouse-pos` property, it is now read-write.
+
+This mechanism isn't used or required when `--wayland-remote-force-grab-cursor` is enabled, as the host pointer would be locked in place and relative motion achieves the same effect.
+
+To enable this, set `--wayland-remote-swaysock` to the path where sway's IPC is located (`$SWAYSOCK`).
+
+In the future, this notification may be done with a private Wayland protocol instead of i3 IPC, but that involves writing more code across more projects.
+
+#### layer shell?
+
+Unfortunately, wlr-layer-shell cannot be used to get output-local pointer motion events unless it also takes pointer focus.
 
 ### Input method relay
 
@@ -115,7 +129,7 @@ Using mpv window embedding (`--wid`) over a dedicated input surface client is no
 
 ## License
 
-The [patches to mpv](https://github.com/layercak3/mpv/tree/mpvif) are licensed under LGPL-2.1-or-later. Other code in this repository is licensed under GPL-3.0-or-later, see COPYING.
+The [patches to mpv](https://github.com/layercak3/mpv/tree/mpvif) are licensed under LGPL-2.1-or-later. The C plugin in mpvif-plugin/ as a whole is licensed under GPL-3.0-or-later, see COPYING.
 
 ## Similar projects
 
