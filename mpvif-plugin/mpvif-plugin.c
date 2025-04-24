@@ -668,6 +668,8 @@ static int dispatch_mpv_events(void)
 static void update_output_layout_pos(void)
 {
     I3ipc_reply_outputs *reply = i3ipc_get_outputs();
+    if (!reply)
+        return;
 
     for (int i = 0; i < reply->outputs_size; i++) {
         I3ipc_reply_outputs_el *output = &reply->outputs[i];
