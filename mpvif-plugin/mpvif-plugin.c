@@ -874,6 +874,10 @@ int mpv_open_cplugin(mpv_handle *mpv)
     mpv_set_wakeup_callback(hmpv, wakeup_mpv_events, NULL);
 
     int i3ipc_fd = str_is_set(remote_swaysock) ? i3ipc_event_fd() : -1;
+    /* seems to return 0 if i3ipc is in a failure state, which we obviously
+     * don't want to add to poll */
+    if (i3ipc_fd == 0)
+        i3ipc_fd = -1;
 
     struct pollfd pfd[3] = {
         {.fd = wl_display_get_fd(display),  .events = POLLIN },
