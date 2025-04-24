@@ -578,6 +578,9 @@ static void pchg_mouse_pos(mpv_node *mouse_node)
     video_pos_x = MAX(video_pos_x, 0);
     video_pos_y = MAX(video_pos_y, 0);
 
+    video_pos_x = MIN(video_pos_x, video_v.w);
+    video_pos_y = MIN(video_pos_y, video_v.h);
+
     zwlr_virtual_pointer_v1_motion_absolute(virtual_pointer, timestamp(),
             video_pos_x, video_pos_y, video_v.w, video_v.h);
     zwlr_virtual_pointer_v1_frame(virtual_pointer);
