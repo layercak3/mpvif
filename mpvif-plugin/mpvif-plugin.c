@@ -769,6 +769,11 @@ static int dispatch_i3ipc_events(void)
     }
 }
 
+static bool str_is_set(const char *str)
+{
+    return str && *str != '\0';
+}
+
 int mpv_open_cplugin(mpv_handle *mpv)
 {
     int rc = -1;
@@ -778,25 +783,25 @@ int mpv_open_cplugin(mpv_handle *mpv)
     wl_list_init(&wayland_toplevel_handle_list);
 
     remote_display_name = mpv_get_property_string(hmpv, "wayland-remote-display-name");
-    if (!remote_display_name) {
+    if (!str_is_set(remote_display_name)) {
         logger("no remote display name set");
         goto done;
     }
 
     remote_output_name = mpv_get_property_string(hmpv, "wayland-remote-output-name");
-    if (!remote_output_name) {
+    if (!str_is_set(remote_output_name)) {
         logger("no remote output name set");
         goto done;
     }
 
     remote_seat_name = mpv_get_property_string(hmpv, "wayland-remote-seat-name");
-    if (!remote_seat_name) {
+    if (!str_is_set(remote_seat_name)) {
         logger("no remote seat name set");
         goto done;
     }
 
     remote_swaysock = mpv_get_property_string(hmpv, "wayland-remote-swaysock");
-    if (!remote_swaysock)
+    if (!str_is_set(remote_swaysock))
         logger("no remote swaysock set, will not relay application pointer warps to the host");
 
     display = wl_display_connect(remote_display_name);
@@ -829,7 +834,7 @@ int mpv_open_cplugin(mpv_handle *mpv)
         I3IPC_EVENT_OUTPUT,
         I3IPC_EVENT_CURSOR_WARP
     };
-    if (remote_swaysock) {
+    if (str_is_set(remote_swaysock)) {
         char *remote_swaysock_dup = strdup(remote_swaysock);
         if (!remote_swaysock_dup) {
             mpv_free(remote_swaysock);
@@ -841,7 +846,7 @@ int mpv_open_cplugin(mpv_handle *mpv)
     }
 
     set_generic_title();
-    if (remote_swaysock)
+    if (str_is_set(remote_swaysock))
         update_output_layout_pos();
     if (mpv_observe_property(hmpv, 0, "wayland-remote-input-forwarding",
                 MPV_FORMAT_FLAG) != 0) {
@@ -865,7 +870,7 @@ int mpv_open_cplugin(mpv_handle *mpv)
 
     mpv_set_wakeup_callback(hmpv, wakeup_mpv_events, NULL);
 
-    int i3ipc_fd = remote_swaysock ? i3ipc_event_fd() : -1;
+    int i3ipc_fd = str_is_set(remote_swaysock) ? i3ipc_event_fd() : -1;
 
     struct pollfd pfd[3] = {
         {.fd = wl_display_get_fd(display),  .events = POLLIN },
