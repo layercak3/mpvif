@@ -212,8 +212,9 @@ static void set_generic_title(void)
 
 static int is_eligible_toplevel(struct wayland_toplevel_handle *tl)
 {
-    return tl->title && tl->app_id && tl->visible_on_remote_output &&
-        tl->fullscreen;
+    /* FIXME: sway/wlroots bug where output_leave is sent after sending state
+     * with fullscreen enum when the window is also set to floating */
+    return tl->title && tl->app_id && tl->fullscreen;
 }
 
 static void create_virtual_pointer(void)
