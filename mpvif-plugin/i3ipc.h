@@ -1140,7 +1140,7 @@ static char const* const i3ipc__global_event_type_name[] = {
 };
 
 
-void i3ipc__init_globals();
+void i3ipc__init_globals(void);
 
 int i3ipc_init_try(char* socketpath) {
     if (!i3ipc__globals_initialized) {
