@@ -619,7 +619,7 @@ static void pchg_wayland_remote_force_grab_cursor(int *value)
 
 void wakeup_mpv_events(void *d)
 {
-    write(wakeup_pipe[1], &(char){0}, 1);
+    (void)write(wakeup_pipe[1], &(char){0}, 1);
 }
 
 static void property_change_event(mpv_event *event)
@@ -647,7 +647,7 @@ static void property_change_event(mpv_event *event)
 static int dispatch_mpv_events(void)
 {
     char drain[4096];
-    read(wakeup_pipe[0], drain, sizeof(drain));
+    (void)read(wakeup_pipe[0], drain, sizeof(drain));
 
     while (true) {
         mpv_event *event = mpv_wait_event(hmpv, 0);
