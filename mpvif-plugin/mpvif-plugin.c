@@ -216,6 +216,12 @@ static int is_eligible_toplevel(struct wayland_toplevel_handle *tl)
     return tl->title && tl->app_id && tl->fullscreen;
 }
 
+static bool should_create_virtual_pointer(void)
+{
+    return !virtual_pointer && remote_output && remote_seat &&
+        input_forwarding_enabled && !force_grab_cursor_enabled;
+}
+
 static void create_virtual_pointer(void)
 {
     virtual_pointer =
@@ -430,8 +436,7 @@ static void output_name(void *data, struct wl_output *wl_output,
     if (strcmp(name, remote_output_name) == 0) {
         remote_output = o;
 
-        if (!virtual_pointer && remote_seat && input_forwarding_enabled &&
-                !force_grab_cursor_enabled)
+        if (should_create_virtual_pointer())
             create_virtual_pointer();
     }
 }
@@ -463,8 +468,7 @@ static void seat_name(void *data, struct wl_seat *wl_seat,
     if (strcmp(name, remote_seat_name) == 0) {
         remote_seat = s;
 
-        if (!virtual_pointer && remote_output && input_forwarding_enabled &&
-                !force_grab_cursor_enabled)
+        if (should_create_virtual_pointer())
             create_virtual_pointer();
     }
 }
@@ -581,8 +585,7 @@ static void pchg_wayland_remote_input_forwarding(int *value)
     input_forwarding_enabled = *value;
     if (!input_forwarding_enabled && virtual_pointer)
         destroy_virtual_pointer();
-    if (!virtual_pointer && input_forwarding_enabled &&
-            !force_grab_cursor_enabled && remote_output && remote_seat)
+    if (should_create_virtual_pointer())
         create_virtual_pointer();
 }
 
@@ -591,8 +594,7 @@ static void pchg_wayland_remote_force_grab_cursor(int *value)
     force_grab_cursor_enabled = *value;
     if (force_grab_cursor_enabled && virtual_pointer)
         destroy_virtual_pointer();
-    if (!virtual_pointer && !force_grab_cursor_enabled &&
-            input_forwarding_enabled && remote_output && remote_seat)
+    if (should_create_virtual_pointer())
         create_virtual_pointer();
 }
 
