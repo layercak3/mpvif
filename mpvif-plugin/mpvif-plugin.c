@@ -425,10 +425,8 @@ static void output_done(void *data, struct wl_output *wl_output)
     if (strcmp(o->name, remote_output_name) == 0) {
         remote_output = o;
 
-        if (virtual_pointer)
-            destroy_virtual_pointer();
-
-        if (remote_seat && input_forwarding_enabled && !force_grab_cursor_enabled)
+        if (!virtual_pointer && remote_seat && input_forwarding_enabled &&
+                !force_grab_cursor_enabled)
             create_virtual_pointer();
     }
 }
@@ -473,10 +471,8 @@ static void seat_name(void *data, struct wl_seat *wl_seat,
     if (strcmp(name, remote_seat_name) == 0) {
         remote_seat = s;
 
-        if (virtual_pointer)
-            destroy_virtual_pointer();
-
-        if (remote_output && input_forwarding_enabled && !force_grab_cursor_enabled)
+        if (!virtual_pointer && remote_output && input_forwarding_enabled &&
+                !force_grab_cursor_enabled)
             create_virtual_pointer();
     }
 }
@@ -591,18 +587,20 @@ done:
 static void pchg_wayland_remote_input_forwarding(int *value)
 {
     input_forwarding_enabled = *value;
-    if (virtual_pointer)
+    if (!input_forwarding_enabled && virtual_pointer)
         destroy_virtual_pointer();
-    if (input_forwarding_enabled && !force_grab_cursor_enabled && remote_output && remote_seat)
+    if (!virtual_pointer && input_forwarding_enabled &&
+            !force_grab_cursor_enabled && remote_output && remote_seat)
         create_virtual_pointer();
 }
 
 static void pchg_wayland_remote_force_grab_cursor(int *value)
 {
     force_grab_cursor_enabled = *value;
-    if (virtual_pointer)
+    if (force_grab_cursor_enabled && virtual_pointer)
         destroy_virtual_pointer();
-    if (!force_grab_cursor_enabled && input_forwarding_enabled && remote_output && remote_seat)
+    if (!virtual_pointer && !force_grab_cursor_enabled &&
+            input_forwarding_enabled && remote_output && remote_seat)
         create_virtual_pointer();
 }
 
