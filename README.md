@@ -119,7 +119,7 @@ If you are trying other codecs and formats, you may or may not need `--untimed`,
 
 With a headless compositor, there will be no keyboards or pointers except for mpvif's virtual keyboard and pointer(s). When mpv is not running, there will be no input devices (perhaps unless you are running an IME which uses virtual-keyboard in the headless display). Applications running will lose the keyboard and pointer capability on their seat until mpvif comes back. Some applications might have problems with this kind of hotplugging:
 
-* Wine's Wayland driver may crash. This will be fixed in upstream wine soon.
+* Wine's Wayland driver may crash. The fix was merged and is/will be in Wine 10.7.
 
 As a workaround, you could write a daemon which creates an unused virtual keyboard/pointer and keep the connection alive, so that the applications never lose the keyboard/pointer capability.
 
