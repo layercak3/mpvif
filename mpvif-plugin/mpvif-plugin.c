@@ -297,14 +297,8 @@ static void toplevel_handle_output_enter(void *data,
     if (!output)
         return;
 
-    struct wayland_output *o;
-    wl_list_for_each(o, &wayland_output_list, link) {
-        if (o->obj != output)
-            continue;
-
-        if (o == remote_output)
-            tl->visible_on_remote_output = true;
-    }
+    if (wl_output_get_user_data(output) == remote_output)
+        tl->visible_on_remote_output = true;
 }
 
 static void toplevel_handle_output_leave(void *data,
@@ -316,14 +310,8 @@ static void toplevel_handle_output_leave(void *data,
     if (!output)
         return;
 
-    struct wayland_output *o;
-    wl_list_for_each(o, &wayland_output_list, link) {
-        if (o->obj != output)
-            continue;
-
-        if (o == remote_output)
-            tl->visible_on_remote_output = false;
-    }
+    if (wl_output_get_user_data(output) == remote_output)
+        tl->visible_on_remote_output = false;
 }
 
 static void toplevel_handle_state(void *data,
