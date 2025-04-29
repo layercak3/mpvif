@@ -43,7 +43,6 @@
 struct wayland_output {
     struct wl_output *obj;
     uint32_t global_id;
-    char *name;
     struct wl_list link;
 };
 
@@ -243,7 +242,6 @@ static void destroy_output(struct wayland_output *o)
     }
 
     wl_output_destroy(o->obj);
-    free(o->name);
     wl_list_remove(&o->link);
     free(o);
 }
@@ -417,18 +415,6 @@ static void output_mode(void *data, struct wl_output *wl_output,
 
 static void output_done(void *data, struct wl_output *wl_output)
 {
-    struct wayland_output *o = data;
-
-    if (!o->name)
-        return;
-
-    if (strcmp(o->name, remote_output_name) == 0) {
-        remote_output = o;
-
-        if (!virtual_pointer && remote_seat && input_forwarding_enabled &&
-                !force_grab_cursor_enabled)
-            create_virtual_pointer();
-    }
 }
 
 static void output_scale(void *data, struct wl_output *wl_output,
@@ -440,8 +426,14 @@ static void output_name(void *data, struct wl_output *wl_output,
         const char *name)
 {
     struct wayland_output *o = data;
-    free(o->name);
-    o->name = strdup(name);
+
+    if (strcmp(name, remote_output_name) == 0) {
+        remote_output = o;
+
+        if (!virtual_pointer && remote_seat && input_forwarding_enabled &&
+                !force_grab_cursor_enabled)
+            create_virtual_pointer();
+    }
 }
 
 static void output_description(void *data, struct wl_output *wl_output,
