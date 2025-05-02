@@ -327,8 +327,10 @@ static void toplevel_handle_state(void *data,
     tl->fullscreen = false;
     enum zwlr_foreign_toplevel_handle_v1_state *state_pos;
     wl_array_for_each(state_pos, state) {
-        if (*state_pos == ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_FULLSCREEN)
+        if (*state_pos == ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_FULLSCREEN) {
             tl->fullscreen = true;
+            break;
+        }
     }
 }
 
