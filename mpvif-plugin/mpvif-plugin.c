@@ -143,6 +143,10 @@ struct mouse_pos_values mouse_node_get_values(mpv_node *node)
     for (int i = 0; i < list->num; i++) {
         char *key = list->keys[i];
         mpv_node *value = &list->values[i];
+
+        if (value->format != MPV_FORMAT_INT64)
+            continue;
+
         if (strcmp(key, "x") == 0)
             mouse_v.x = value->u.int64;
         else if (strcmp(key, "y") == 0)
@@ -160,6 +164,10 @@ struct osd_dimensions_values osd_node_get_values(mpv_node *node)
     for (int i = 0; i < list->num; i++) {
         char *key = list->keys[i];
         mpv_node *value = &list->values[i];
+
+        if (value->format != MPV_FORMAT_INT64)
+            continue;
+
         if (strcmp(key, "ml") == 0)
             osd_v.ml = value->u.int64;
         else if (strcmp(key, "mr") == 0)
@@ -185,6 +193,10 @@ struct video_params_values video_node_get_values(mpv_node *node)
     for (int i = 0; i < list->num; i++) {
         char *key = list->keys[i];
         mpv_node *value = &list->values[i];
+
+        if (value->format != MPV_FORMAT_INT64)
+            continue;
+
         if (strcmp(key, "w") == 0)
             video_v.w = value->u.int64;
         else if (strcmp(key, "h") == 0)
