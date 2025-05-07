@@ -221,6 +221,11 @@ static void set_generic_title(void)
     mpv_set_property_string(hmpv, "force-media-title", media_title);
 }
 
+static void unset_title(void)
+{
+    mpv_set_property_string(hmpv, "force-media-title", "");
+}
+
 static bool is_eligible_toplevel(struct wayland_toplevel_handle *tl)
 {
     /* FIXME: sway/wlroots bug where output_leave is sent after sending state
@@ -954,6 +959,8 @@ done:
 
     if (display)
         wl_display_disconnect(display);
+
+    unset_title();
 
     mpv_free(remote_display_name);
     mpv_free(remote_output_name);
