@@ -279,6 +279,11 @@ static void destroy_seat(struct wayland_seat *s)
 
 static void destroy_toplevel_handle(struct wayland_toplevel_handle *tl)
 {
+    if (current_eligible_toplevel == tl) {
+        current_eligible_toplevel = NULL;
+        set_generic_title();
+    }
+
     zwlr_foreign_toplevel_handle_v1_destroy(tl->obj);
     free(tl->title);
     free(tl->app_id);
@@ -368,11 +373,6 @@ static void toplevel_handle_closed(void *data,
         struct zwlr_foreign_toplevel_handle_v1 *zwlr_foreign_toplevel_handle_v1)
 {
     struct wayland_toplevel_handle *tl = data;
-
-    if (current_eligible_toplevel == tl) {
-        current_eligible_toplevel = NULL;
-        set_generic_title();
-    }
 
     destroy_toplevel_handle(tl);
 }
