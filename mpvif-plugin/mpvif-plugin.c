@@ -943,6 +943,15 @@ done:
     wl_list_for_each_safe(tl, tl_tmp, &wayland_toplevel_handle_list, link)
         destroy_toplevel_handle(tl);
 
+    if (toplevel_manager)
+        zwlr_foreign_toplevel_manager_v1_stop(toplevel_manager);
+
+    if (virtual_pointer)
+        destroy_virtual_pointer();
+
+    if (virtual_pointer_manager)
+        zwlr_virtual_pointer_manager_v1_destroy(virtual_pointer_manager);
+
     if (display)
         wl_display_disconnect(display);
 
