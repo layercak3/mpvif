@@ -66,19 +66,19 @@ struct mouse_pos_values {
     int64_t y;
 };
 
-struct osd_dimensions_values {
+static struct osd_dimensions_values {
     int64_t ml;
     int64_t mr;
     int64_t mt;
     int64_t mb;
     int64_t w;
     int64_t h;
-};
+} osd_v;
 
-struct video_params_values {
+static struct video_params_values {
     int64_t w;
     int64_t h;
-};
+} video_v;
 
 static struct wayland_toplevel_handle *current_eligible_toplevel;
 
@@ -156,10 +156,8 @@ struct mouse_pos_values mouse_node_get_values(mpv_node *node)
     return mouse_v;
 }
 
-struct osd_dimensions_values osd_node_get_values(mpv_node *node)
+void osd_node_get_values(mpv_node *node)
 {
-    struct osd_dimensions_values osd_v = {0};
-
     mpv_node_list *list = node->u.list;
     for (int i = 0; i < list->num; i++) {
         char *key = list->keys[i];
@@ -181,14 +179,10 @@ struct osd_dimensions_values osd_node_get_values(mpv_node *node)
         else if (strcmp(key, "h") == 0)
             osd_v.h = value->u.int64;
     }
-
-    return osd_v;
 }
 
-struct video_params_values video_node_get_values(mpv_node *node)
+void video_node_get_values(mpv_node *node)
 {
-    struct video_params_values video_v = {0};
-
     mpv_node_list *list = node->u.list;
     for (int i = 0; i < list->num; i++) {
         char *key = list->keys[i];
@@ -202,8 +196,6 @@ struct video_params_values video_node_get_values(mpv_node *node)
         else if (strcmp(key, "h") == 0)
             video_v.h = value->u.int64;
     }
-
-    return video_v;
 }
 
 static void set_fullscreen_title(void)
@@ -560,29 +552,21 @@ static const struct wl_registry_listener registry_listener = {
     registry_global_remove,
 };
 
-static void pchg_mouse_pos(mpv_node *mouse_node)
+static void pchg_mouse_pos(mpv_node *node)
 {
     if (!virtual_pointer)
         return;
 
-    mpv_node osd_node = {0};
-    mpv_node video_node = {0};
+    struct mouse_pos_values mouse_v = mouse_node_get_values(node);
 
-    if (mpv_get_property(hmpv, "osd-dimensions", MPV_FORMAT_NODE, &osd_node) != 0)
-        goto done;
+    int32_t denominator_x = osd_v.w - osd_v.ml - osd_v.mr;
+    int32_t denominator_y = osd_v.h - osd_v.mt - osd_v.mb;
 
-    if (mpv_get_property(hmpv, "video-params", MPV_FORMAT_NODE, &video_node) != 0)
-        goto done;
+    if ((denominator_x == 0) || (denominator_y == 0))
+        return;
 
-    struct mouse_pos_values mouse_v = mouse_node_get_values(mouse_node);
-    struct osd_dimensions_values osd_v = osd_node_get_values(&osd_node);
-    struct video_params_values video_v = video_node_get_values(&video_node);
-
-    if (((osd_v.w - osd_v.ml - osd_v.mr) == 0) || ((osd_v.h - osd_v.mt - osd_v.mb) == 0))
-        goto done;
-
-    int32_t video_pos_x = (mouse_v.x - osd_v.ml) * video_v.w / (osd_v.w - osd_v.ml - osd_v.mr);
-    int32_t video_pos_y = (mouse_v.y - osd_v.mt) * video_v.h / (osd_v.h - osd_v.mt - osd_v.mb);
+    int32_t video_pos_x = (mouse_v.x - osd_v.ml) * video_v.w / denominator_x;
+    int32_t video_pos_y = (mouse_v.y - osd_v.mt) * video_v.h / denominator_y;
 
     video_pos_x = MAX(video_pos_x, 0);
     video_pos_y = MAX(video_pos_y, 0);
@@ -593,10 +577,16 @@ static void pchg_mouse_pos(mpv_node *mouse_node)
     zwlr_virtual_pointer_v1_motion_absolute(virtual_pointer, timestamp(),
             video_pos_x, video_pos_y, video_v.w, video_v.h);
     zwlr_virtual_pointer_v1_frame(virtual_pointer);
+}
 
-done:
-    mpv_free_node_contents(&osd_node);
-    mpv_free_node_contents(&video_node);
+static void pchg_osd_dimensions(mpv_node *node)
+{
+    osd_node_get_values(node);
+}
+
+static void pchg_video_params(mpv_node *node)
+{
+    video_node_get_values(node);
 }
 
 static void pchg_wayland_remote_input_forwarding(int *value)
@@ -631,6 +621,16 @@ static void property_change_event(mpv_event *event)
             pchg_mouse_pos(event_prop->data);
         else
             logger("mouse-pos property unavailable/error");
+    } else if (strcmp(event_prop->name, "osd-dimensions") == 0) {
+        if (event_prop->format == MPV_FORMAT_NODE)
+            pchg_osd_dimensions(event_prop->data);
+        else
+            logger("osd-dimensions property unavailable/error");
+    } else if (strcmp(event_prop->name, "video-params") == 0) {
+        if (event_prop->format == MPV_FORMAT_NODE)
+            pchg_video_params(event_prop->data);
+        else
+            logger("video-params property unavailable/error");
     } else if (strcmp(event_prop->name, "wayland-remote-input-forwarding") == 0) {
         if (event_prop->format == MPV_FORMAT_FLAG)
             pchg_wayland_remote_input_forwarding(event_prop->data);
@@ -722,18 +722,6 @@ static void i3e_cursor_warp(I3ipc_event *ev_any)
     int output_local_x = ev->lx - output_layout_x;
     int output_local_y = ev->ly - output_layout_y;
 
-    mpv_node osd_node = {0};
-    mpv_node video_node = {0};
-
-    if (mpv_get_property(hmpv, "osd-dimensions", MPV_FORMAT_NODE, &osd_node) != 0)
-        goto done;
-
-    if (mpv_get_property(hmpv, "video-params", MPV_FORMAT_NODE, &video_node) != 0)
-        goto done;
-
-    struct osd_dimensions_values osd_v = osd_node_get_values(&osd_node);
-    struct video_params_values video_v = video_node_get_values(&video_node);
-
     int64_t mouse_pos_x = (output_local_x * (osd_v.w - osd_v.ml - osd_v.mr) / video_v.w) + osd_v.ml;
     int64_t mouse_pos_y = (output_local_y * (osd_v.h - osd_v.mt - osd_v.mb) / video_v.h) + osd_v.mt;
 
@@ -744,10 +732,6 @@ static void i3e_cursor_warp(I3ipc_event *ev_any)
     mouse_pos_y = MIN(mouse_pos_y, osd_v.h);
 
     set_mpv_mouse_pos(mouse_pos_x, mouse_pos_y);
-
-done:
-    mpv_free_node_contents(&osd_node);
-    mpv_free_node_contents(&video_node);
 }
 
 static int dispatch_i3ipc_events(void)
@@ -855,6 +839,16 @@ int mpv_open_cplugin(mpv_handle *mpv)
     set_generic_title();
     if (str_is_set(remote_swaysock))
         update_output_layout_pos();
+    if (mpv_observe_property(hmpv, 0, "osd-dimensions",
+                MPV_FORMAT_NODE) != 0) {
+        logger("failed to observe the osd-dimensions property");
+        goto done;
+    }
+    if (mpv_observe_property(hmpv, 0, "video-params",
+                MPV_FORMAT_NODE) != 0) {
+        logger("failed to observe the video-params property");
+        goto done;
+    }
     if (mpv_observe_property(hmpv, 0, "wayland-remote-input-forwarding",
                 MPV_FORMAT_FLAG) != 0) {
         logger("failed to observe the wayland-remote-input-forwarding property");
