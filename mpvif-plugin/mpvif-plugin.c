@@ -629,8 +629,6 @@ static void property_change_event(mpv_event *event)
     } else if (strcmp(event_prop->name, "video-params") == 0) {
         if (event_prop->format == MPV_FORMAT_NODE)
             pchg_video_params(event_prop->data);
-        else
-            logger("video-params property unavailable/error");
     } else if (strcmp(event_prop->name, "wayland-remote-input-forwarding") == 0) {
         if (event_prop->format == MPV_FORMAT_FLAG)
             pchg_wayland_remote_input_forwarding(event_prop->data);
