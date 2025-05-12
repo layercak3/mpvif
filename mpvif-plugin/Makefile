@@ -5,8 +5,8 @@ BASE_LDFLAGS = $(shell $(PKG_CONFIG) --libs wayland-client)
 
 WAYLAND_SCANNER = $(shell pkg-config --variable=wayland_scanner wayland-scanner)
 
-HEADERS = foreign-toplevel-management-client-protocol.h virtual-pointer-client-protocol.h i3ipc.h
-SOURCES = mpvif-plugin.c foreign-toplevel-management-client-protocol.c virtual-pointer-client-protocol.c
+HEADERS = ext-data-control-client-protocol.h foreign-toplevel-management-client-protocol.h virtual-pointer-client-protocol.h i3ipc.h
+SOURCES = mpvif-plugin.c ext-data-control-client-protocol.c foreign-toplevel-management-client-protocol.c virtual-pointer-client-protocol.c
 
 SCRIPTS_DIR := $(HOME)/.config/mpv/scripts
 
@@ -23,11 +23,17 @@ UID ?= $(shell id -u)
 mpvif-plugin.so: $(HEADERS) $(SOURCES)
 	$(CC) -o mpvif-plugin.so $(SOURCES) $(BASE_CFLAGS) $(CFLAGS) $(BASE_LDFLAGS) $(LDFLAGS) -shared -fPIC
 
+ext-data-control-client-protocol.h:
+	$(WAYLAND_SCANNER) client-header ext-data-control-v1.xml ext-data-control-client-protocol.h
+
 foreign-toplevel-management-client-protocol.h:
 	$(WAYLAND_SCANNER) client-header wlr-foreign-toplevel-management-unstable-v1.xml foreign-toplevel-management-client-protocol.h
 
 virtual-pointer-client-protocol.h:
 	$(WAYLAND_SCANNER) client-header wlr-virtual-pointer-unstable-v1.xml virtual-pointer-client-protocol.h
+
+ext-data-control-client-protocol.c:
+	$(WAYLAND_SCANNER) private-code ext-data-control-v1.xml ext-data-control-client-protocol.c
 
 foreign-toplevel-management-client-protocol.c:
 	$(WAYLAND_SCANNER) private-code wlr-foreign-toplevel-management-unstable-v1.xml foreign-toplevel-management-client-protocol.c
@@ -61,5 +67,5 @@ uninstall-system: mpvif-plugin.so
 
 clean:
 	$(RM) mpvif-plugin.so \
-        foreign-toplevel-management-client-protocol.h virtual-pointer-client-protocol.h \
-        foreign-toplevel-management-client-protocol.c virtual-pointer-client-protocol.c
+        ext-data-control-client-protocol.h foreign-toplevel-management-client-protocol.h virtual-pointer-client-protocol.h \
+        ext-data-control-client-protocol.c foreign-toplevel-management-client-protocol.c virtual-pointer-client-protocol.c

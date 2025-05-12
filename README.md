@@ -22,7 +22,7 @@ This is a bit more complicated. Button and axis events are forwarded in the vo. 
 
 ### Clipboard synchronization
 
-This is trivial but not implemented yet.
+If the remote compositor supports ext-data-control, clipboard synchronization is supported. This uses mpv's native clipboard support.
 
 ### Pointer locks, confinement, relative motion, mouselook
 

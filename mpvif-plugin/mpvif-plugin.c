@@ -34,11 +34,40 @@
 #include <wayland-client.h>
 #include <wayland-util.h>
 
+#include "ext-data-control-client-protocol.h"
 #include "foreign-toplevel-management-client-protocol.h"
 #include "virtual-pointer-client-protocol.h"
 
 #define I3IPC_IMPLEMENTATION
 #include "i3ipc.h"
+
+/*
+ * Using non-blocking sockets for the clipboard and properly handling multiple
+ * concurrent transfers would require managing the poll array in a more complex
+ * way. Just use blocking sockets and call it a day.
+ */
+
+/* UTF-8 or ambiguous text MIME types */
+const char * const utf8_mimes[] = {
+    "text/plain;charset=utf-8",
+    "text/plain",
+    "TEXT",
+    "STRING",
+    "UTF8_STRING"
+};
+
+/*
+ * When we set the remote selection, we get an offer on the remote data device
+ * for our own selection. We listen on all offers and set the mpv property to
+ * the offer, which means we receive on our own offer. We're doing blocking
+ * calls so this will hang the plugin. Even if that were not the case, it would
+ * also unnecessarily "echo" the selection back to the host by setting the mpv
+ * property and triggering mpv to set the selection again.
+ *
+ * A unique MIME type is offered to detect our own offers and ignore them.
+ */
+static char custom_mime_type_name[24];
+static const char *custom_mime_type_data = "mpvif";
 
 struct wayland_output {
     struct wl_output *obj;
@@ -59,6 +88,12 @@ struct wayland_toplevel_handle {
     bool visible_on_remote_output;
     bool fullscreen;
     struct wl_list link;
+};
+
+struct wayland_data_control_source {
+    struct ext_data_control_source_v1 *obj;
+    char *text;
+    size_t len;
 };
 
 struct mouse_pos_values {
@@ -82,6 +117,13 @@ static struct video_params_values {
 
 static struct wayland_toplevel_handle *current_eligible_toplevel;
 
+static struct wayland_data_control_source selection_source;
+static struct wayland_data_control_source primary_selection_source;
+
+static struct ext_data_control_offer_v1 *dc_offer;
+static int dc_offer_mime_idx = -1;
+static bool dc_offer_is_our_own;
+
 static struct wl_list wayland_output_list;
 static struct wl_list wayland_seat_list;
 static struct wl_list wayland_toplevel_handle_list;
@@ -94,12 +136,17 @@ static struct zwlr_virtual_pointer_v1 *virtual_pointer;
 
 static struct zwlr_foreign_toplevel_manager_v1 *toplevel_manager;
 
+static struct ext_data_control_manager_v1 *data_control_manager;
+static struct ext_data_control_device_v1 *data_control_device;
+
 static struct wayland_output *remote_output;
 static struct wayland_seat *remote_seat;
 
 static int wakeup_pipe[2] = {-1, -1};
 
 static uint64_t mouse_pos_reply_userdata = 1;
+static uint64_t clipboard_text_reply_userdata = 2;
+static uint64_t clipboard_text_primary_reply_userdata = 3;
 
 static char *remote_display_name;
 static char *remote_output_name;
@@ -116,177 +163,20 @@ static int output_layout_y;
 
 static mpv_handle *hmpv;
 
-static void logger(const char *fmt, ...)
-{
-    fprintf(stderr, "mpvif-plugin: ");
-
-    va_list ap;
-    va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    fprintf(stderr, "\n");
-    va_end(ap);
-}
-
-static int timestamp(void)
-{
-    struct timespec tp;
-    clock_gettime(CLOCK_MONOTONIC, &tp);
-    int ms = 1000 * tp.tv_sec + tp.tv_nsec / 1000000;
-    return ms;
-}
-
-struct mouse_pos_values mouse_node_get_values(mpv_node *node)
-{
-    struct mouse_pos_values mouse_v = {0};
-
-    mpv_node_list *list = node->u.list;
-    for (int i = 0; i < list->num; i++) {
-        char *key = list->keys[i];
-        mpv_node *value = &list->values[i];
-
-        if (value->format != MPV_FORMAT_INT64)
-            continue;
-
-        if (strcmp(key, "x") == 0)
-            mouse_v.x = value->u.int64;
-        else if (strcmp(key, "y") == 0)
-            mouse_v.y = value->u.int64;
-    }
-
-    return mouse_v;
-}
-
-void osd_node_get_values(mpv_node *node)
-{
-    mpv_node_list *list = node->u.list;
-    for (int i = 0; i < list->num; i++) {
-        char *key = list->keys[i];
-        mpv_node *value = &list->values[i];
-
-        if (value->format != MPV_FORMAT_INT64)
-            continue;
-
-        if (strcmp(key, "ml") == 0)
-            osd_v.ml = value->u.int64;
-        else if (strcmp(key, "mr") == 0)
-            osd_v.mr = value->u.int64;
-        else if (strcmp(key, "mt") == 0)
-            osd_v.mt = value->u.int64;
-        else if (strcmp(key, "mb") == 0)
-            osd_v.mb = value->u.int64;
-        else if (strcmp(key, "w") == 0)
-            osd_v.w = value->u.int64;
-        else if (strcmp(key, "h") == 0)
-            osd_v.h = value->u.int64;
-    }
-}
-
-void video_node_get_values(mpv_node *node)
-{
-    mpv_node_list *list = node->u.list;
-    for (int i = 0; i < list->num; i++) {
-        char *key = list->keys[i];
-        mpv_node *value = &list->values[i];
-
-        if (value->format != MPV_FORMAT_INT64)
-            continue;
-
-        if (strcmp(key, "w") == 0)
-            video_v.w = value->u.int64;
-        else if (strcmp(key, "h") == 0)
-            video_v.h = value->u.int64;
-    }
-}
-
-static void set_fullscreen_title(void)
-{
-    snprintf(media_title, sizeof(media_title), "[%s] %s [%s %s %s]",
-            current_eligible_toplevel->app_id, current_eligible_toplevel->title,
-            remote_display_name, remote_output_name, remote_seat_name);
-    mpv_set_property_string(hmpv, "force-media-title", media_title);
-}
-
-static void set_generic_title(void)
-{
-    snprintf(media_title, sizeof(media_title), "Remote desktop [%s %s %s]",
-            remote_display_name, remote_output_name, remote_seat_name);
-    mpv_set_property_string(hmpv, "force-media-title", media_title);
-}
-
-static void unset_title(void)
-{
-    mpv_set_property_string(hmpv, "force-media-title", "");
-}
-
-static bool is_eligible_toplevel(struct wayland_toplevel_handle *tl)
-{
-    /* FIXME: sway/wlroots bug where output_leave is sent after sending state
-     * with fullscreen enum when the window is also set to floating */
-    return tl->title && tl->app_id && tl->fullscreen;
-}
-
-static bool should_create_virtual_pointer(void)
-{
-    return !virtual_pointer && remote_output && remote_seat &&
-        input_forwarding_enabled && !force_grab_cursor_enabled;
-}
-
-static void create_virtual_pointer(void)
-{
-    virtual_pointer =
-        zwlr_virtual_pointer_manager_v1_create_virtual_pointer_with_output(
-                virtual_pointer_manager, remote_seat->obj, remote_output->obj);
-    if (mpv_observe_property(hmpv, mouse_pos_reply_userdata, "mouse-pos", MPV_FORMAT_NODE) != 0)
-        logger("failed to observe the mouse-pos property");
-}
-
-static void destroy_virtual_pointer(void)
-{
-    zwlr_virtual_pointer_v1_destroy(virtual_pointer);
-    virtual_pointer = NULL;
-    if (mpv_unobserve_property(hmpv, mouse_pos_reply_userdata) < 0)
-        logger("failed to unobserve the mouse-pos property");
-}
-
-static void destroy_output(struct wayland_output *o)
-{
-    if (o == remote_output) {
-        if (virtual_pointer)
-            destroy_virtual_pointer();
-        remote_output = NULL;
-    }
-
-    wl_output_destroy(o->obj);
-    wl_list_remove(&o->link);
-    free(o);
-}
-
-static void destroy_seat(struct wayland_seat *s)
-{
-    if (s == remote_seat) {
-        if (virtual_pointer)
-            destroy_virtual_pointer();
-        remote_seat = NULL;
-    }
-
-    wl_seat_release(s->obj);
-    wl_list_remove(&s->link);
-    free(s);
-}
-
-static void destroy_toplevel_handle(struct wayland_toplevel_handle *tl)
-{
-    if (current_eligible_toplevel == tl) {
-        current_eligible_toplevel = NULL;
-        set_generic_title();
-    }
-
-    zwlr_foreign_toplevel_handle_v1_destroy(tl->obj);
-    free(tl->title);
-    free(tl->app_id);
-    wl_list_remove(&tl->link);
-    free(tl);
-}
+static bool is_eligible_toplevel(struct wayland_toplevel_handle *tl);
+static void set_fullscreen_title(void);
+static void set_generic_title(void);
+static void destroy_toplevel_handle(struct wayland_toplevel_handle *tl);
+static void logger(const char *fmt, ...);
+static void destroy_data_control_source(struct wayland_data_control_source *ds);
+static void destroy_data_control_device(void);
+static void handle_selection(struct ext_data_control_offer_v1 *id, bool primary);
+static bool should_create_virtual_pointer(void);
+static void create_virtual_pointer(void);
+static bool should_create_data_control_device(void);
+static void create_data_control_device(void);
+static void destroy_output(struct wayland_output *o);
+static void destroy_seat(struct wayland_seat *s);
 
 static void toplevel_handle_title(void *data,
         struct zwlr_foreign_toplevel_handle_v1 *zwlr_foreign_toplevel_handle_v1,
@@ -418,6 +308,124 @@ static const struct zwlr_foreign_toplevel_manager_v1_listener toplevel_manager_l
     toplevel_manager_finished,
 };
 
+static void data_control_source_send(void *data,
+        struct ext_data_control_source_v1 *ext_data_control_source_v1,
+        const char *mime_type, int fd)
+{
+    struct wayland_data_control_source *ds = data;
+    const char *clip_data = NULL;
+    size_t clip_len = 0;
+
+    for (size_t i = 0; i < sizeof(utf8_mimes) / sizeof(utf8_mimes[0]); i++) {
+        if (strcmp(mime_type, utf8_mimes[i]) == 0) {
+            clip_data = ds->text;
+            clip_len = ds->len;
+            break;
+        }
+    }
+
+    if (!clip_data) {
+        if (strcmp(mime_type, custom_mime_type_name) == 0) {
+            clip_data = custom_mime_type_data;
+            clip_len = strlen(custom_mime_type_data);
+        }
+    }
+
+    if (clip_data) {
+        if (write(fd, clip_data, clip_len) == -1)
+               logger("write() failed: %m");
+    }
+
+    close(fd);
+}
+
+static void data_control_source_cancelled(void *data,
+        struct ext_data_control_source_v1 *ext_data_control_source_v1)
+{
+    struct wayland_data_control_source *ds = data;
+
+    destroy_data_control_source(ds);
+}
+
+static const struct ext_data_control_source_v1_listener data_control_source_listener = {
+    data_control_source_send,
+    data_control_source_cancelled,
+};
+
+static void data_control_offer_offer(void *data,
+        struct ext_data_control_offer_v1 *ext_data_control_offer_v1,
+        const char *mime_type)
+{
+    if (ext_data_control_offer_v1 != dc_offer) {
+        logger("unexpected data offer offer event, shouldn't happen");
+        return;
+    }
+
+    if (dc_offer_is_our_own)
+        return;
+
+    if (strcmp(mime_type, custom_mime_type_name) == 0) {
+        dc_offer_is_our_own = true;
+        return;
+    }
+
+    /* prefer to use text/plain;charset=utf-8, applications hopefully offer this
+     * one first */
+    if (dc_offer_mime_idx == 0)
+        return;
+
+    for (size_t i = 0; i < sizeof(utf8_mimes) / sizeof(utf8_mimes[0]); i++) {
+        if (strcmp(mime_type, utf8_mimes[i]) == 0) {
+            dc_offer_mime_idx = i;
+            return;
+        }
+    }
+}
+
+static const struct ext_data_control_offer_v1_listener data_control_offer_listener = {
+    data_control_offer_offer,
+};
+
+static void data_control_device_data_offer(void *data,
+        struct ext_data_control_device_v1 *ext_data_control_device_v1,
+        struct ext_data_control_offer_v1 *id)
+{
+    if (!id)
+        return;
+
+    dc_offer = id;
+    ext_data_control_offer_v1_add_listener(id, &data_control_offer_listener,
+            NULL);
+}
+
+static void data_control_device_selection(void *data,
+        struct ext_data_control_device_v1 *ext_data_control_device_v1,
+        struct ext_data_control_offer_v1 *id)
+{
+    handle_selection(id, false);
+}
+
+static void data_control_device_finished(void *data,
+        struct ext_data_control_device_v1 *ext_data_control_device_v1)
+{
+    logger("compositor is finished with our data control device for some reason");
+    destroy_data_control_device();
+}
+
+static void data_control_device_primary_selection(void *data,
+        struct ext_data_control_device_v1 *ext_data_control_device_v1,
+        struct ext_data_control_offer_v1 *id)
+{
+    handle_selection(id, true);
+}
+
+static const struct ext_data_control_device_v1_listener data_control_device_listener = {
+    data_control_device_data_offer,
+    data_control_device_selection,
+    data_control_device_finished,
+    data_control_device_primary_selection,
+};
+
 static void output_geometry(void *data, struct wl_output *wl_output,
         int32_t x, int32_t y, int32_t physical_width, int32_t physical_height,
         int32_t subpixel, const char *make, const char *model,
@@ -481,6 +489,9 @@ static void seat_name(void *data, struct wl_seat *wl_seat,
 
         if (should_create_virtual_pointer())
             create_virtual_pointer();
+
+        if (should_create_data_control_device())
+            create_data_control_device();
     }
 }
 
@@ -502,6 +513,11 @@ static void registry_global(void *data, struct wl_registry *wl_registry,
                 &zwlr_foreign_toplevel_manager_v1_interface, 3);
         zwlr_foreign_toplevel_manager_v1_add_listener(toplevel_manager,
                 &toplevel_manager_listener, NULL);
+    }
+
+    if (strcmp(interface, ext_data_control_manager_v1_interface.name) == 0) {
+        data_control_manager = wl_registry_bind(registry, name,
+                &ext_data_control_manager_v1_interface, 1);
     }
 
     if (strcmp(interface, wl_output_interface.name) == 0) {
@@ -552,6 +568,357 @@ static const struct wl_registry_listener registry_listener = {
     registry_global_remove,
 };
 
+static void logger(const char *fmt, ...)
+{
+    fprintf(stderr, "mpvif-plugin: ");
+
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    fprintf(stderr, "\n");
+    va_end(ap);
+}
+
+static int timestamp(void)
+{
+    struct timespec tp;
+    clock_gettime(CLOCK_MONOTONIC, &tp);
+    int ms = 1000 * tp.tv_sec + tp.tv_nsec / 1000000;
+    return ms;
+}
+
+static bool str_is_set(const char *str)
+{
+    return str && *str != '\0';
+}
+
+struct mouse_pos_values mouse_node_get_values(mpv_node *node)
+{
+    struct mouse_pos_values mouse_v = {0};
+
+    mpv_node_list *list = node->u.list;
+    for (int i = 0; i < list->num; i++) {
+        char *key = list->keys[i];
+        mpv_node *value = &list->values[i];
+
+        if (value->format != MPV_FORMAT_INT64)
+            continue;
+
+        if (strcmp(key, "x") == 0)
+            mouse_v.x = value->u.int64;
+        else if (strcmp(key, "y") == 0)
+            mouse_v.y = value->u.int64;
+    }
+
+    return mouse_v;
+}
+
+void osd_node_get_values(mpv_node *node)
+{
+    mpv_node_list *list = node->u.list;
+    for (int i = 0; i < list->num; i++) {
+        char *key = list->keys[i];
+        mpv_node *value = &list->values[i];
+
+        if (value->format != MPV_FORMAT_INT64)
+            continue;
+
+        if (strcmp(key, "ml") == 0)
+            osd_v.ml = value->u.int64;
+        else if (strcmp(key, "mr") == 0)
+            osd_v.mr = value->u.int64;
+        else if (strcmp(key, "mt") == 0)
+            osd_v.mt = value->u.int64;
+        else if (strcmp(key, "mb") == 0)
+            osd_v.mb = value->u.int64;
+        else if (strcmp(key, "w") == 0)
+            osd_v.w = value->u.int64;
+        else if (strcmp(key, "h") == 0)
+            osd_v.h = value->u.int64;
+    }
+}
+
+void video_node_get_values(mpv_node *node)
+{
+    mpv_node_list *list = node->u.list;
+    for (int i = 0; i < list->num; i++) {
+        char *key = list->keys[i];
+        mpv_node *value = &list->values[i];
+
+        if (value->format != MPV_FORMAT_INT64)
+            continue;
+
+        if (strcmp(key, "w") == 0)
+            video_v.w = value->u.int64;
+        else if (strcmp(key, "h") == 0)
+            video_v.h = value->u.int64;
+    }
+}
+
+static void set_fullscreen_title(void)
+{
+    snprintf(media_title, sizeof(media_title), "[%s] %s [%s %s %s]",
+            current_eligible_toplevel->app_id, current_eligible_toplevel->title,
+            remote_display_name, remote_output_name, remote_seat_name);
+    mpv_set_property_string(hmpv, "force-media-title", media_title);
+}
+
+static void set_generic_title(void)
+{
+    snprintf(media_title, sizeof(media_title), "Remote desktop [%s %s %s]",
+            remote_display_name, remote_output_name, remote_seat_name);
+    mpv_set_property_string(hmpv, "force-media-title", media_title);
+}
+
+static void unset_title(void)
+{
+    mpv_set_property_string(hmpv, "force-media-title", "");
+}
+
+static bool is_eligible_toplevel(struct wayland_toplevel_handle *tl)
+{
+    /* FIXME: sway/wlroots bug where output_leave is sent after sending state
+     * with fullscreen enum when the window is also set to floating */
+    return tl->title && tl->app_id && tl->fullscreen;
+}
+
+static bool should_create_virtual_pointer(void)
+{
+    return !virtual_pointer && remote_output && remote_seat &&
+        input_forwarding_enabled && !force_grab_cursor_enabled;
+}
+
+static void create_virtual_pointer(void)
+{
+    virtual_pointer =
+        zwlr_virtual_pointer_manager_v1_create_virtual_pointer_with_output(
+                virtual_pointer_manager, remote_seat->obj, remote_output->obj);
+    if (mpv_observe_property(hmpv, mouse_pos_reply_userdata, "mouse-pos", MPV_FORMAT_NODE) != 0)
+        logger("failed to observe the mouse-pos property");
+}
+
+static void destroy_virtual_pointer(void)
+{
+    zwlr_virtual_pointer_v1_destroy(virtual_pointer);
+    virtual_pointer = NULL;
+    if (mpv_unobserve_property(hmpv, mouse_pos_reply_userdata) < 0)
+        logger("failed to unobserve the mouse-pos property");
+}
+
+static void destroy_toplevel_handle(struct wayland_toplevel_handle *tl)
+{
+    if (current_eligible_toplevel == tl) {
+        current_eligible_toplevel = NULL;
+        set_generic_title();
+    }
+
+    zwlr_foreign_toplevel_handle_v1_destroy(tl->obj);
+    free(tl->title);
+    free(tl->app_id);
+    wl_list_remove(&tl->link);
+    free(tl);
+}
+
+static bool should_create_data_control_device(void)
+{
+    return !data_control_device && remote_seat && input_forwarding_enabled;
+}
+
+static void create_data_control_device(void)
+{
+    data_control_device = ext_data_control_manager_v1_get_data_device(
+            data_control_manager, remote_seat->obj);
+    ext_data_control_device_v1_add_listener(data_control_device,
+            &data_control_device_listener, NULL);
+    if (mpv_observe_property(hmpv, clipboard_text_reply_userdata,
+                "clipboard/text", MPV_FORMAT_STRING) != 0)
+        logger("failed to observe the clipboard/text property");
+    if (mpv_observe_property(hmpv, clipboard_text_primary_reply_userdata,
+                "clipboard/text-primary", MPV_FORMAT_STRING) != 0)
+        logger("failed to observe the clipboard/text-primary property");
+}
+
+static void destroy_data_control_device(void)
+{
+    ext_data_control_device_v1_destroy(data_control_device);
+    data_control_device = NULL;
+    if (mpv_unobserve_property(hmpv, clipboard_text_reply_userdata) < 0)
+        logger("failed to unobserve the clipboard/text property");
+    if (mpv_unobserve_property(hmpv, clipboard_text_primary_reply_userdata) < 0)
+        logger("failed to unobserve the clipboard/text-primary property");
+}
+
+static void destroy_data_control_source(struct wayland_data_control_source *ds)
+{
+    ext_data_control_source_v1_destroy(ds->obj);
+    ds->obj = NULL;
+    free(ds->text);
+    ds->text = NULL;
+    ds->len = 0;
+}
+
+static void destroy_dc_offer(void)
+{
+    ext_data_control_offer_v1_destroy(dc_offer);
+    dc_offer = NULL;
+    dc_offer_mime_idx = -1;
+    dc_offer_is_our_own = false;
+}
+
+static void destroy_output(struct wayland_output *o)
+{
+    if (o == remote_output) {
+        if (virtual_pointer)
+            destroy_virtual_pointer();
+        remote_output = NULL;
+    }
+
+    wl_output_destroy(o->obj);
+    wl_list_remove(&o->link);
+    free(o);
+}
+
+static void destroy_seat(struct wayland_seat *s)
+{
+    if (s == remote_seat) {
+        if (virtual_pointer)
+            destroy_virtual_pointer();
+        if (data_control_device)
+            destroy_data_control_device();
+        remote_seat = NULL;
+    }
+
+    wl_seat_release(s->obj);
+    wl_list_remove(&s->link);
+    free(s);
+}
+
+static void receive_offer(bool primary)
+{
+    char read_buf[4096];
+    FILE *mem_fp;
+    char *mem_data;
+    size_t mem_size;
+    int receive_pipe[2];
+
+    if (pipe2(receive_pipe, O_CLOEXEC) == -1) {
+        logger("pipe2() failed: %m");
+        return;
+    }
+
+    if (!(mem_fp = open_memstream(&mem_data, &mem_size))) {
+        logger("open_memstream() failed: %m");
+        close(receive_pipe[0]);
+        close(receive_pipe[1]);
+        return;
+    }
+
+    ext_data_control_offer_v1_receive(dc_offer, utf8_mimes[dc_offer_mime_idx],
+            receive_pipe[1]);
+    wl_display_flush(display);
+    close(receive_pipe[1]);
+
+    while (true) {
+        ssize_t ret = read(receive_pipe[0], read_buf, sizeof(read_buf));
+        if (ret == -1) {
+            logger("read() failed: %m");
+            fclose(mem_fp);
+            close(receive_pipe[0]);
+            free(mem_data);
+            return;
+        }
+
+        if (ret == 0)
+            break;
+
+        fwrite(read_buf, ret, 1, mem_fp);
+    }
+
+    fwrite(&(char){0}, 1, 1, mem_fp);
+    fclose(mem_fp);
+    close(receive_pipe[0]);
+
+    const char *prop = primary ? "clipboard/text-primary" : "clipboard/text";
+    if (mem_size)
+        mpv_set_property_string(hmpv, prop, mem_data);
+
+    free(mem_data);
+}
+
+static void handle_selection(struct ext_data_control_offer_v1 *id, bool primary)
+{
+    if (!id) {
+        if (dc_offer)
+            destroy_dc_offer();
+        return;
+    }
+
+    if (id != dc_offer) {
+        logger("unexpected data offer offer event, shouldn't happen");
+        return;
+    }
+
+    if (!dc_offer_is_our_own && dc_offer_mime_idx != -1)
+        receive_offer(primary);
+
+    destroy_dc_offer();
+}
+
+static void update_remote_selection(const char *selection_text, bool primary)
+{
+    if (!data_control_device)
+        return;
+
+    if (!str_is_set(selection_text))
+        goto set_null;
+
+    char *text_dup = strdup(selection_text);
+    if (!text_dup)
+        goto set_null;
+    size_t text_len = strlen(text_dup);
+
+    struct ext_data_control_source_v1 *data_control_source =
+        ext_data_control_manager_v1_create_data_source(data_control_manager);
+
+    ext_data_control_source_v1_offer(data_control_source, custom_mime_type_name);
+    for (size_t i = 0; i < sizeof(utf8_mimes) / sizeof(utf8_mimes[0]); i++)
+        ext_data_control_source_v1_offer(data_control_source, utf8_mimes[i]);
+
+    struct wayland_data_control_source old_source;
+
+    if (primary) {
+        old_source = primary_selection_source;
+        ext_data_control_source_v1_add_listener(data_control_source,
+                &data_control_source_listener, &primary_selection_source);
+        primary_selection_source.obj = data_control_source;
+        primary_selection_source.text = text_dup;
+        primary_selection_source.len = text_len;
+        ext_data_control_device_v1_set_primary_selection(
+                data_control_device, data_control_source);
+    } else {
+        old_source = selection_source;
+        ext_data_control_source_v1_add_listener(data_control_source,
+                &data_control_source_listener, &selection_source);
+        selection_source.obj = data_control_source;
+        selection_source.text = text_dup;
+        selection_source.len = text_len;
+        ext_data_control_device_v1_set_selection(
+                data_control_device, data_control_source);
+    }
+    if (old_source.obj)
+        destroy_data_control_source(&old_source);
+
+    return;
+
+set_null:
+    if (primary) {
+        ext_data_control_device_v1_set_primary_selection(
+                data_control_device, NULL);
+    } else {
+        ext_data_control_device_v1_set_selection(data_control_device, NULL);
+    }
+}
+
 static void pchg_mouse_pos(mpv_node *node)
 {
     if (!virtual_pointer)
@@ -577,6 +944,16 @@ static void pchg_mouse_pos(mpv_node *node)
     zwlr_virtual_pointer_v1_motion_absolute(virtual_pointer, timestamp(),
             video_pos_x, video_pos_y, video_v.w, video_v.h);
     zwlr_virtual_pointer_v1_frame(virtual_pointer);
+}
+
+static void pchg_clipboard_text(char **string)
+{
+    update_remote_selection(*string, false);
+}
+
+static void pchg_clipboard_text_primary(char **string)
+{
+    update_remote_selection(*string, true);
 }
 
 static void pchg_osd_dimensions(mpv_node *node)
@@ -629,6 +1006,12 @@ static void property_change_event(mpv_event *event)
     } else if (strcmp(event_prop->name, "video-params") == 0) {
         if (event_prop->format == MPV_FORMAT_NODE)
             pchg_video_params(event_prop->data);
+    } else if (strcmp(event_prop->name, "clipboard/text") == 0) {
+        if (event_prop->format == MPV_FORMAT_STRING)
+            pchg_clipboard_text(event_prop->data);
+    } else if (strcmp(event_prop->name, "clipboard/text-primary") == 0) {
+        if (event_prop->format == MPV_FORMAT_STRING)
+            pchg_clipboard_text_primary(event_prop->data);
     } else if (strcmp(event_prop->name, "wayland-remote-input-forwarding") == 0) {
         if (event_prop->format == MPV_FORMAT_FLAG)
             pchg_wayland_remote_input_forwarding(event_prop->data);
@@ -757,11 +1140,6 @@ static int dispatch_i3ipc_events(void)
     }
 }
 
-static bool str_is_set(const char *str)
-{
-    return str && *str != '\0';
-}
-
 int mpv_open_cplugin(mpv_handle *mpv)
 {
     int rc = -1;
@@ -815,6 +1193,9 @@ int mpv_open_cplugin(mpv_handle *mpv)
     if (!toplevel_manager)
         logger("failed to get the optional foreign toplevel manager object, force-media-title won't be updated for fullscreen windows");
 
+    if (!data_control_manager)
+        logger("failed to get the optional data control manager object, clipboard synchronization won't work");
+
     /* i3ipc_init_try calls free() on your string.
      * also, what if the plugin exits and is loaded again? */
     int i3ipc_event[] = {
@@ -866,6 +1247,9 @@ int mpv_open_cplugin(mpv_handle *mpv)
         logger("pipe2() failed: %m");
         goto done;
     }
+
+    snprintf(custom_mime_type_name, sizeof(custom_mime_type_name),
+            "x-mpvif-plugin-%08x", (unsigned int)arc4random());
 
     mpv_set_wakeup_callback(hmpv, wakeup_mpv_events, NULL);
 
@@ -939,6 +1323,18 @@ done:
     struct wayland_toplevel_handle *tl, *tl_tmp;
     wl_list_for_each_safe(tl, tl_tmp, &wayland_toplevel_handle_list, link)
         destroy_toplevel_handle(tl);
+
+    if (selection_source.obj)
+        destroy_data_control_source(&selection_source);
+
+    if (primary_selection_source.obj)
+        destroy_data_control_source(&primary_selection_source);
+
+    if (data_control_device)
+        destroy_data_control_device();
+
+    if (data_control_manager)
+        ext_data_control_manager_v1_destroy(data_control_manager);
 
     if (toplevel_manager)
         zwlr_foreign_toplevel_manager_v1_stop(toplevel_manager);
