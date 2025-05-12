@@ -301,6 +301,8 @@ static void toplevel_manager_finished(void *data,
         struct zwlr_foreign_toplevel_manager_v1 *zwlr_foreign_toplevel_manager_v1)
 {
     logger("compositor is finished with our toplevel manager for some reason");
+    zwlr_foreign_toplevel_manager_v1_stop(toplevel_manager);
+    toplevel_manager = NULL;
 }
 
 static const struct zwlr_foreign_toplevel_manager_v1_listener toplevel_manager_listener = {
