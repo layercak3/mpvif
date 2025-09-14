@@ -123,6 +123,16 @@ With a headless compositor, there will be no keyboards or pointers except for mp
 
 As a workaround, you could write a daemon which creates an unused virtual keyboard/pointer and keep the connection alive, so that the applications never lose the keyboard/pointer capability.
 
+#### Downscaler
+
+If you are viewing 2D/moe illustrations and mpv is adding a downscaler after your shader due your scale factor being incompatible, consider changing the downscaler from the default `hermite` to something more sharp, e.g.:
+
+```
+dscale=lanczos
+linear-downscaling=no
+correct-downscaling=no
+```
+
 ## Alternative implementation
 
 Using mpv window embedding (`--wid`) over a dedicated input surface client is not possible on Wayland. Using the libmpv render API has limitations compared to standalone mpv VOs so I'm hesitant to use that. Modifying the wayland VO code is also the simplest implementation.
