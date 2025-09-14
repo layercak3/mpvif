@@ -1,6 +1,6 @@
 PKG_CONFIG ?= pkg-config
 
-BASE_CFLAGS = -Wall -Wextra -Wpedantic -Werror -Wno-unused-parameter -Wno-c23-extensions -O2 $(shell $(PKG_CONFIG) --cflags mpv wayland-client)
+BASE_CFLAGS = -Wall -Wextra -Wpedantic -Wno-unused-parameter -Wno-c23-extensions -O2 $(shell $(PKG_CONFIG) --cflags mpv wayland-client)
 BASE_LDFLAGS = $(shell $(PKG_CONFIG) --libs wayland-client)
 
 WAYLAND_SCANNER = $(shell pkg-config --variable=wayland_scanner wayland-scanner)
