@@ -244,10 +244,8 @@ static void toplevel_handle_done(void *data,
     struct wayland_toplevel_handle *tl = data;
 
     if (is_eligible_toplevel(tl)) {
-        if (current_eligible_toplevel != tl) {
-            current_eligible_toplevel = tl;
-            set_fullscreen_title();
-        }
+        current_eligible_toplevel = tl;
+        set_fullscreen_title();
     } else {
         if (current_eligible_toplevel == tl) {
             current_eligible_toplevel = NULL;
