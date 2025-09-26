@@ -570,13 +570,22 @@ static const struct wl_registry_listener registry_listener = {
 
 static void logger(const char *fmt, ...)
 {
-    fprintf(stderr, "mpvif-plugin: ");
+    char log_buf[4096];
+    size_t log_buf_count = 0;
+
+    log_buf_count += snprintf(log_buf + log_buf_count,
+            sizeof(log_buf) - log_buf_count, "%s: ", mpv_client_name(hmpv));
+
+    if (log_buf_count >= sizeof(log_buf))
+        return;
 
     va_list ap;
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    fprintf(stderr, "\n");
+    log_buf_count += vsnprintf(log_buf + log_buf_count,
+            sizeof(log_buf) - log_buf_count, fmt, ap);
     va_end(ap);
+
+    mpv_command(hmpv, (const char *[]){"print-text", log_buf, NULL});
 }
 
 static int timestamp(void)
